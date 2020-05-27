@@ -6,6 +6,9 @@ import il.ac.technion.cs.softwaredesign.storage.SecureStorageFactory
 import java.lang.Exception
 import java.lang.IllegalStateException
 import java.nio.charset.Charset
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Future
+import java.util.function.Function
 
 /**
  * A simple database implementation using the provided read/write methods.
@@ -14,66 +17,66 @@ import java.nio.charset.Charset
  * Ensures type safety for each database type
  */
 class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private val charset: Charset = Charsets.UTF_8) {
-    private val torrentsStorage : SecureStorage = storageFactory.open("torrents".toByteArray(charset))
-    private val peersStorage : SecureStorage = storageFactory.open("peers".toByteArray(charset))
-    private val statsStorage : SecureStorage = storageFactory.open("stats".toByteArray(charset))
+    private val torrentsStorage : CompletableFuture<SecureStorage> = storageFactory.open("torrents".toByteArray(charset))
+    private val peersStorage : CompletableFuture<SecureStorage> = storageFactory.open("peers".toByteArray(charset))
+    private val statsStorage : CompletableFuture<SecureStorage> = storageFactory.open("stats".toByteArray(charset))
 
-    fun torrentsCreate(key: String, value: List<List<String>>) : Unit {
-        create(torrentsStorage, key, Ben.encodeStr(value).toByteArray())
+    fun torrentsCreate(key: String, value: List<List<String>>) : CompletableFuture<Unit> {
+        return torrentsStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray())}
     }
-    fun peersCreate(key: String, value: List<Map<String, String>>) : Unit {
-        create(peersStorage, key, Ben.encodeStr(value).toByteArray())
+    fun peersCreate(key: String, value: List<Map<String, String>>) : CompletableFuture<Unit> {
+        return peersStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray())}
     }
-    fun statsCreate(key: String, value: Map<String, Map<String, Any>>) : Unit {
-        create(statsStorage, key, Ben.encodeStr(value).toByteArray())
-    }
-
-    fun torrentsRead(key: String) : List<List<String>> {
-        val dbContent = read(torrentsStorage, key)
-        try {
-            return Ben(dbContent).decode() as List<List<String>>
-        }
-        catch (e: Exception) {
-            throw IllegalStateException("Database contents disobey type rules")
-        }
-    }
-    fun peersRead(key: String) : List<Map<String, String>> {
-        val dbContent = read(peersStorage, key)
-        try {
-            return Ben(dbContent).decode() as List<Map<String, String>>
-        }
-        catch (e: Exception) {
-            throw IllegalStateException("Database contents disobey type rules")
-        }
-    }
-    fun statsRead(key: String) : Map<String, Map<String, Any>> {
-        val dbContent = read(statsStorage, key)
-        try {
-            return Ben(dbContent).decode() as Map<String, Map<String, Any>>
-        }
-        catch (e: Exception) {
-            throw IllegalStateException("Database contents disobey type rules")
-        }
+    fun statsCreate(key: String, value: Map<String, Map<String, Any>>) : CompletableFuture<Unit> {
+        return statsStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray())}
     }
 
-    fun torrentsUpdate(key: String, value: List<List<String>>) : Unit {
-        update(torrentsStorage, key, Ben.encodeStr(value).toByteArray())
-    }
-    fun peersUpdate(key: String, value: List<Map<String, String>>) : Unit {
-        update(peersStorage, key, Ben.encodeStr(value).toByteArray())
-    }
-    fun statsUpdate(key: String, value: Map<String, Map<String, Any>>) : Unit {
-        update(statsStorage, key, Ben.encodeStr(value).toByteArray())
+    fun torrentsRead(key: String) : CompletableFuture<List<List<String>>> {
+        return torrentsStorage.thenApply { read(it,key) }
+            .thenCompose { dbContent ->  dbContent }//to extract the value from the CompletableFuture
+            .thenApply {dbContent->
+                        dbContent?.let { Ben(dbContent).decode() } as? List<List<String>>
+                            ?: throw IllegalStateException("Database contents disobey type rules")
+                        }
+
     }
 
-    fun torrentsDelete(key: String) : Unit {
-        delete(torrentsStorage, key)
+    fun peersRead(key: String) : CompletableFuture<List<Map<String, String>>> {
+        return peersStorage.thenApply { read(it,key) }
+            .thenCompose { dbContent ->  dbContent }//to extract the value from the CompletableFuture
+            .thenApply {dbContent->
+                dbContent?.let { Ben(dbContent).decode() } as? List<Map<String, String>>
+                    ?: throw IllegalStateException("Database contents disobey type rules")
+            }
     }
-    fun peersDelete(key: String) : Unit {
-        delete(torrentsStorage, key)
+
+    fun statsRead(key: String) : CompletableFuture<Map<String, Map<String, Any>>> {
+        return statsStorage.thenApply { read(it,key) }
+            .thenCompose { dbContent ->  dbContent }//to extract the value from the CompletableFuture
+            .thenApply {dbContent->
+                dbContent?.let { Ben(dbContent).decode() } as? Map<String, Map<String, Any>>
+                    ?: throw IllegalStateException("Database contents disobey type rules")
+            }
     }
-    fun statsDelete(key: String) : Unit {
-        delete(torrentsStorage, key)
+
+    fun torrentsUpdate(key: String, value: List<List<String>>) : CompletableFuture<Unit> {
+        return torrentsStorage.thenApply { update(it, key, Ben.encodeStr(value).toByteArray())}
+    }
+    fun peersUpdate(key: String, value: List<Map<String, String>>) : CompletableFuture<Unit> {
+        return peersStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray())}
+    }
+    fun statsUpdate(key: String, value: Map<String, Map<String, Any>>) : CompletableFuture<Unit> {
+        return statsStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray())}
+    }
+
+    fun torrentsDelete(key: String) : CompletableFuture<Unit> {
+        return torrentsStorage.thenApply { delete(it, key) }
+    }
+    fun peersDelete(key: String) : CompletableFuture<Unit> {
+        return peersStorage.thenApply { delete(it, key) }
+    }
+    fun statsDelete(key: String) : CompletableFuture<Unit> {
+        return statsStorage.thenApply { delete(it, key) }
     }
 
 
@@ -81,13 +84,20 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
      * Creates a key-value pair in the given database
      * @throws IllegalStateException if the key already exists in the database
      */
-    private fun create(storage: SecureStorage, key: String, value: ByteArray) {
-        val oldValueByteArray = storage.read(key.toByteArray(charset))
-        if (oldValueByteArray != null && oldValueByteArray.size != 0) {
-            throw IllegalStateException("Key already exists")
+    private fun create(storage: SecureStorage, key: String, value: ByteArray): CompletableFuture<Unit> {
+        return storage.read(key.toByteArray(charset)).thenApply {
+            if (it == null || it.isEmpty()) {
+                null//TODO: should throw an exception right at this stage?
+            } else {
+                it
+            }
+        }.thenCompose {
+            if (it == null) {
+                throw IllegalArgumentException("Key already exists")
+            } else {
+                storage.write(key.toByteArray(charset), value)
+            }
         }
-
-        storage.write(key.toByteArray(charset), value)
     }
 
     /**
@@ -95,24 +105,35 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
      * @throws IllegalArgumentException if the key doesn't exist in the database
      * @returns the requested value
      */
-    private fun read(storage: SecureStorage, key: String) : ByteArray {
-        val value = storage.read(key.toByteArray(charset))
-        if(value == null || value.size == 0) {
-            throw IllegalArgumentException("Key doesn't exist")
+
+    private fun read(storage: SecureStorage, key: String) : CompletableFuture<ByteArray?> {
+        return storage.read(key.toByteArray(charset)).thenApply {
+            if (it == null || it.isEmpty()) {
+                throw IllegalArgumentException("Key doesn't exist")
+            } else {
+                it
+            }
         }
-        return value
     }
 
     /**
      * Updates a key-value pair in the given database
      * @throws IllegalArgumentException if the key doesn't exists in the database
      */
-    private fun update(storage: SecureStorage, key: String, value: ByteArray) {
-        val oldValueByteArray = storage.read(key.toByteArray(charset))
-        if (oldValueByteArray == null || oldValueByteArray.size == 0) {
-            throw IllegalArgumentException("Key doesn't exist")
+    private fun update(storage: SecureStorage, key: String, value: ByteArray): CompletableFuture<Unit> {
+        return storage.read(key.toByteArray(charset)).thenApply {
+            if (it == null || it.isEmpty()) {
+                null//TODO: should throw an exception right at this stage?
+            } else {
+                it
+            }
+        }.thenCompose {
+            if (it == null) {
+                throw IllegalArgumentException("Key doesn't exist")
+            } else {
+                storage.write(key.toByteArray(charset), value)
+            }
         }
-        storage.write(key.toByteArray(charset), value)
     }
 
 

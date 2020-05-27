@@ -7,6 +7,9 @@ import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
 import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
 import java.util.concurrent.CompletableFuture
+import com.google.inject.Inject
+import java.util.concurrent.Future
+import kotlin.streams.toList
 
 /**
  * This is the class implementing CourseTorrent, a BitTorrent client.
@@ -16,7 +19,8 @@ import java.util.concurrent.CompletableFuture
  * + Communication with trackers (announce, scrape).
  * + Communication with peers (downloading! uploading!)
  */
-class CourseTorrent {
+class CourseTorrent @Inject constructor(private val database: SimpleDB) {
+    val alphaNumericID : String = Utils.getRandomChars(6)
     /**
      * Load in the torrent metainfo file from [torrent]. The specification for these files can be found here:
      * [Metainfo File Structure](https://wiki.theory.org/index.php/BitTorrentSpecification#Metainfo_File_Structure).
@@ -29,7 +33,20 @@ class CourseTorrent {
      * @throws IllegalStateException If the infohash of [torrent] is already loaded.
      * @return The infohash of the torrent, i.e., the SHA-1 of the `info` key of [torrent].
      */
-    fun load(torrent: ByteArray): CompletableFuture<String> = TODO("Implement me!")
+    fun load(torrent: ByteArray): CompletableFuture<String> {
+        val torrentData = TorrentFile.deserialize(torrent)
+        val infohash = torrentData.infohash
+        return database.torrentsCreate(infohash, torrentData.announceList).thenApply { torrentFuture ->
+            torrentFuture ?: throw IllegalStateException("Same infohash already loaded")
+        }.thenCompose {
+            database.peersCreate(infohash, listOf())
+        }.thenCompose {
+            database.statsCreate(infohash, mapOf())
+        }.thenApply {
+            infohash
+        }
+
+    }
 
     /**
      * Remove the torrent identified by [infohash] from the system.
