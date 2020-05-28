@@ -6,6 +6,7 @@ import il.ac.technion.cs.softwaredesign.Utils.Companion.withParams
 import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
 import java.lang.Exception
 import java.lang.IllegalArgumentException
+import java.util.concurrent.CompletableFuture
 
 class TorrentFile(val infohash : String, immutableList : List<List<String>>) {
     var announceList : MutableList<MutableList<String>>
@@ -68,50 +69,54 @@ class TorrentFile(val infohash : String, immutableList : List<List<String>>) {
      * @throws TrackerException if no trackers return a non-failure response
      * @returns the response string from the tracker, de-bencoded
      */
-    fun announceTracker(params: List<Pair<String, String>>, database: SimpleDB) : Map<String, Any> {
-        val trackerStats = database.statsRead(infohash).toMutableMap()
-        var lastErrorMessage = "Empty announce list"
-        for(tier in this.announceList) {
-            for(trackerURL in tier) {
-                val (_, _, result) = trackerURL.withParams(params).httpGet().response()
-                if(result is Result.Failure) {
-                    lastErrorMessage = "Connection failed"
-                    trackerStats[trackerURL] = mapOf("failure reason" to lastErrorMessage)
-                    continue
-                }
-                else {
-                    //successful connection
-                    val responseMap : Map<String, Any>? = Ben(result.get()).decode() as? Map<String, Any>?
-                    if(responseMap != null && responseMap.containsKey("failure reason")) {
-                        lastErrorMessage = responseMap["failure reason"] as String
+    fun announceTracker(params: List<Pair<String, String>>, database: SimpleDB) : CompletableFuture<Map<String, Any>> {
+        return database.statsRead(infohash).thenApply { statsRead ->
+            val trackerStats = statsRead.toMutableMap()
+            var lastErrorMessage = "Empty announce list"
+            for(tier in this.announceList) {
+                for(trackerURL in tier) {
+                    val (_, _, result) = trackerURL.withParams(params).httpGet().response()
+                    if(result is Result.Failure) {
+                        lastErrorMessage = "Connection failed"
                         trackerStats[trackerURL] = mapOf("failure reason" to lastErrorMessage)
                         continue
                     }
-                    if(responseMap == null || !responseMap.containsKey("peers")) {
-                        lastErrorMessage = "Connection failed" //response invalid
-                        trackerStats[trackerURL] = mapOf("failure reason" to lastErrorMessage)
-                        continue
-                    }
-                    //reorder the tier to have the successful tracker at index 0
-                    tier.remove(trackerURL)
-                    tier.add(0, trackerURL)
-                    //update tracker stats
-                    val name = trackerStats[trackerURL]?.get("name") as? String?
-                    val newScrapeData = mutableMapOf<String, Any>("complete" to (responseMap["complete"] as? Long? ?: trackerStats[trackerURL]?.get("complete") as? Long ?: 0),
+                    else {
+                        //successful connection
+                        val responseMap : Map<String, Any>? = Ben(result.get()).decode() as? Map<String, Any>?
+                        if(responseMap != null && responseMap.containsKey("failure reason")) {
+                            lastErrorMessage = responseMap["failure reason"] as String
+                            trackerStats[trackerURL] = mapOf("failure reason" to lastErrorMessage)
+                            continue
+                        }
+                        if(responseMap == null || !responseMap.containsKey("peers")) {
+                            lastErrorMessage = "Connection failed" //response invalid
+                            trackerStats[trackerURL] = mapOf("failure reason" to lastErrorMessage)
+                            continue
+                        }
+                        //reorder the tier to have the successful tracker at index 0
+                        tier.remove(trackerURL)
+                        tier.add(0, trackerURL)
+                        //update tracker stats
+                        val name = trackerStats[trackerURL]?.get("name") as? String?
+                        val newScrapeData = mutableMapOf<String, Any>("complete" to (responseMap["complete"] as? Long? ?: trackerStats[trackerURL]?.get("complete") as? Long ?: 0),
                             "downloaded" to (trackerStats[trackerURL]?.get("downloaded") as? Long ?: 0),
                             "incomplete" to (responseMap["incomplete"] as? Long? ?: trackerStats[trackerURL]?.get("incomplete") as? Long ?: 0))
-                    if(name != null) {
-                        newScrapeData["name"] = name
+                        if(name != null) {
+                            newScrapeData["name"] = name
+                        }
+                        trackerStats[trackerURL] = newScrapeData
+                        database.statsUpdate(infohash, trackerStats)
+                        //return the response map
+                        responseMap
                     }
-                    trackerStats[trackerURL] = newScrapeData
-                    database.statsUpdate(infohash, trackerStats)
-                    //return the response map
-                    return responseMap
                 }
             }
+            database.statsUpdate(infohash, trackerStats).apply {  }
+            throw TrackerException(lastErrorMessage)
+
         }
-        database.statsUpdate(infohash, trackerStats)
-        throw TrackerException(lastErrorMessage)
+
     }
 
     /**
@@ -119,20 +124,22 @@ class TorrentFile(val infohash : String, immutableList : List<List<String>>) {
      * -This function also updates the tracker stats for every tracker if it can be scraped
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
-    fun scrapeTrackers(database: SimpleDB):  Map<String, Map<String, Any>>{
-        val torrentAllStats = database.statsRead(infohash).toMutableMap()
-        for (tier in announceList) {
-            for (trackerURL in tier) {
+    fun scrapeTrackers(database: SimpleDB): CompletableFuture<MutableMap<String, Map<String, Any>>>? {
+        return database.statsRead(infohash).thenApply { statsRead->
+            val torrentAllStats = statsRead.toMutableMap()
+            for (tier in announceList) {
+                for (trackerURL in tier) {
                 //find the last occurrence of '/' and if it followed by "announce" then change to string to "scrape" and send request
-                var lastSlash = trackerURL.lastIndexOf('/')
-                ++lastSlash
-                if (trackerURL.substring(lastSlash, lastSlash + "announce".length) == "announce") {
-                    val newTrackerStatsMap: Map<String, Any> = sendScrapeRequest(infohash, trackerURL, lastSlash)
-                    updateCurrentTrackerStats(newTrackerStatsMap, torrentAllStats, trackerURL)
+                    var lastSlash = trackerURL.lastIndexOf('/')
+                    ++lastSlash
+                    if (trackerURL.substring(lastSlash, lastSlash + "announce".length) == "announce") {
+                        val newTrackerStatsMap: Map<String, Any> = sendScrapeRequest(infohash, trackerURL, lastSlash)
+                        updateCurrentTrackerStats(newTrackerStatsMap, torrentAllStats, trackerURL)
+                    }
                 }
             }
+            torrentAllStats
         }
-        return torrentAllStats
     }
 
     /**

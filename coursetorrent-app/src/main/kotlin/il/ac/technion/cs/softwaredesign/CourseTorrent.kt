@@ -55,7 +55,14 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      *
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
-    fun unload(infohash: String): CompletableFuture<Unit> = TODO("Implement me!")
+    fun unload(infohash: String): CompletableFuture<Unit> {
+        return database.torrentsDelete(infohash)
+                .thenApply { torrentsDeleteFuture -> torrentsDeleteFuture ?: throw IllegalArgumentException("Infohash doesn't exist") }
+                .thenCompose {database.peersDelete(infohash) }
+                .thenApply { peersDeleteFuture -> peersDeleteFuture ?: throw IllegalArgumentException("Infohash doesn't exist") }
+                .thenCompose {database.statsDelete(infohash) }
+                .thenApply { statsDeleteFuture -> statsDeleteFuture ?: throw IllegalArgumentException("Infohash doesn't exist") }
+    }
 
     /**
      * Return the announce URLs for the loaded torrent identified by [infohash].
@@ -70,7 +77,12 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @throws IllegalArgumentException If [infohash] is not loaded.
      * @return Tier lists of announce URLs.
      */
-    fun announces(infohash: String): CompletableFuture<List<List<String>>> = TODO("Implement me!")
+    fun announces(infohash: String): CompletableFuture<List<List<String>>> {
+        return database.torrentsRead(infohash).thenApply { itList ->
+            val torrentData = TorrentFile(infohash, itList)//throws IllegalArgumentException
+            torrentData.announceList
+        }
+    }
 
     /**
      * Send an "announce" HTTP request to a single tracker of the torrent identified by [infohash], and update the
@@ -108,8 +120,31 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         uploaded: Long,
         downloaded: Long,
         left: Long
-    ): CompletableFuture<Int> =
-        TODO("Implement me!")
+    ): CompletableFuture<Int> {
+        return database.torrentsRead(infohash).thenApply { itList ->
+            var torrentFile = TorrentFile(infohash, itList)//throws IllegalArgumentException
+            if (event == TorrentEvent.STARTED) torrentFile.shuffleAnnounceList()
+            val params = listOf(
+                "info_hash" to Utils.urlEncode(infohash),
+                "peer_id" to this.getPeerID(),
+                "port" to "6881", //Matan said to leave it like that, will be changed in future assignments
+                "uploaded" to uploaded.toString(),
+                "downloaded" to downloaded.toString(),
+                "left" to left.toString(),
+                "compact" to "1",
+                "event" to event.asString
+            )
+
+            torrentFile.announceTracker(params, database).thenApply { response ->
+                database.torrentsUpdate(infohash, torrentFile.announceList).thenApply { }
+                val peers: List<Map<String, String>> = getPeersFromResponse(response)
+                addToPeers(infohash, peers)
+                response
+            }.thenApply { response ->
+                (response["interval"] as Long).toInt()
+            }.get()
+        }
+    }
 
     /**
      * Scrape all trackers identified by a torrent, and store the statistics provided. The specification for the scrape
@@ -122,7 +157,15 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      *
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
-    fun scrape(infohash: String): CompletableFuture<Unit> = TODO("Implement me!")
+    fun scrape(infohash: String): CompletableFuture<Unit> {
+        return database.torrentsRead(infohash).thenApply { itList ->
+            val torrentFile = TorrentFile(infohash, itList)//throws IllegalArgumentException
+            torrentFile.scrapeTrackers(database)?.thenApply { torrentAllStats->
+                database.statsUpdate(infohash, torrentAllStats)
+            }
+            //update the current stats of the torrent file in the stats db
+        }
+    }
 
     /**
      * Invalidate a previously known peer for this torrent.
@@ -133,7 +176,12 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      *
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
-    fun invalidatePeer(infohash: String, peer: KnownPeer): CompletableFuture<Unit> = TODO("Implement me!")
+    fun invalidatePeer(infohash: String, peer: KnownPeer): CompletableFuture<Unit> {
+        return database.peersRead(infohash).thenApply { peersList ->
+            val newPeerslist = peersList.filter { it->  (it["ip"] != peer.ip)  || (it["port"] != peer.port.toString()) }
+            database.peersUpdate(infohash, newPeerslist)
+        }
+    }
 
     /**
      * Return all known peers for the torrent identified by [infohash], in sorted order. This list should contain all
@@ -148,7 +196,14 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @throws IllegalArgumentException If [infohash] is not loaded.
      * @return Sorted list of known peers.
      */
-    fun knownPeers(infohash: String): CompletableFuture<List<KnownPeer>> = TODO("Implement me!")
+    fun knownPeers(infohash: String): CompletableFuture<List<KnownPeer>> {
+        return database.peersRead(infohash).thenApply { peersList ->
+            val sortedPeers = peersList.stream().map {
+                    it -> KnownPeer(it["ip"] as String,it["port"]?.toInt() ?: 0,it["peer id"] as String?)
+            }.sorted { o1, o2 -> Utils.compareIPs(o1.ip,o2.ip)}.toList()
+            sortedPeers
+        }
+    }
 
     /**
      * Return all known statistics from trackers of the torrent identified by [infohash]. The statistics displayed
@@ -168,7 +223,23 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @throws IllegalArgumentException If [infohash] is not loaded.
      * @return A mapping from tracker announce URL to statistics.
      */
-    fun trackerStats(infohash: String): CompletableFuture<Map<String, ScrapeData>> = TODO("Implement me!")
+    fun trackerStats(infohash: String): CompletableFuture<Map<String, ScrapeData>> {
+        return database.statsRead(infohash).thenApply { dbStatsMap ->
+            val trackerStatsMap = hashMapOf<String, ScrapeData>()
+            for ((trackerUrl, trackerValue) in dbStatsMap) {
+                val trackerMap = trackerValue as Map<String, Any>
+                if(trackerMap.containsKey("failure reason")) {
+                    trackerStatsMap[trackerUrl] = Failure(trackerMap["failure reason"] as String)
+                } else {
+                    trackerStatsMap[trackerUrl] = Scrape((trackerMap["complete"]as Long).toInt(),
+                        (trackerMap["downloaded"]as Long).toInt(),
+                        (trackerMap["incomplete"]as Long).toInt(),
+                        trackerMap["name"] as? String?)
+                }
+            }
+            trackerStatsMap
+        }
+    }
 
     /**
      * Return information about the torrent identified by [infohash]. These statistics represent the current state
@@ -417,4 +488,52 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @return True if all the pieces have been downloaded and passed hash checking, false otherwise.
      */
     fun recheck(infohash: String): CompletableFuture<Boolean> = TODO("Implement me!")
+    /**
+     * Returns the peer ID of the client
+     * Peer ID should be set to "-CS1000-{Student ID}{Random numbers}", where {Student ID} is the first 6 characters
+     * from the hex-encoded SHA-1 hash of the student's ID numbers (i.e., `hex(sha1(student1id + student2id))`), and
+     * {Random numbers} are 6 random characters in the range [0-9a-zA-Z] generated at instance creation.
+     */
+    private fun getPeerID(): String {
+        val studentIDs = "206989105308328467"
+        val builder = StringBuilder()
+        builder.append("-CS1000-")
+        builder.append(Utils.sha1hash(studentIDs.toByteArray()).substring(0, 6))
+        builder.append(alphaNumericID)
+        return builder.toString()
+    }
+
+    private fun addToPeers(infohash : String, newPeers : List<Map<String, String>>) : CompletableFuture<Unit>{
+
+        return database.peersRead(infohash).thenCompose { it ->
+            val currPeers = it.toSet().toMutableSet()
+            currPeers.addAll(newPeers) //Matan said that peers with same IP, same port, but different peer id will not be tested
+            database.peersUpdate(infohash, currPeers.toList())
+        }
+    }
+
+    /**
+     * If the response is not compact, return string as-is. Otherwise, turn the compact string
+     * into non-compact and then return
+     */
+    private fun getPeersFromResponse(response: Map<String, Any>):List<Map<String, String>> {
+        assert(response.containsKey("peers"))
+        if(response["peers"] is List<*>) {
+            return response["peers"] as List<Map<String, String>>
+        }
+        else {
+            val peersByteArray = response["peers"] as ByteArray
+            val peers = mutableListOf<Map<String, String>>()
+            var i = 0
+            while(i < peersByteArray.size) {
+                peers.add(mapOf(
+                    "ip" to (peersByteArray[i].toUByte().toInt().toString() + "." + peersByteArray[i+1].toUByte().toInt().toString() + "."
+                            + peersByteArray[i+2].toUByte().toInt().toString() + "." + peersByteArray[i+3].toUByte().toInt().toString()),
+                    "port" to (peersByteArray[i+4].toUByte().toInt() * 256 + peersByteArray[i+5].toUByte().toInt()).toString()
+                ))
+                i += 6
+            }
+            return peers
+        }
+    }
 }
