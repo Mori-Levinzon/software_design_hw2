@@ -11,11 +11,14 @@ import com.natpryce.hamkrest.*
 import com.natpryce.hamkrest.assertion.assertThat
 import dev.misfitlabs.kotlinguice4.getInstance
 import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
+import io.github.vjames19.futures.jdk8.ImmediateFuture
 import io.mockk.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertDoesNotThrow
 import org.junit.jupiter.api.assertThrows
+import java.lang.IllegalArgumentException
+import java.lang.IllegalStateException
 import java.time.Duration
 import kotlin.or
 
@@ -43,53 +46,62 @@ class CourseTorrentHW1Test {
         every { memoryDB.torrentsCreate(capture(key), capture(torrentsValue)) } answers {
             if(torrentsStorage.containsKey(key.captured)) throw IllegalStateException()
             torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
+            ImmediateFuture{Unit}
         }
         every { memoryDB.peersCreate(capture(key), capture(peersValue)) } answers {
             if(peersStorage.containsKey(key.captured)) throw IllegalStateException()
             peersStorage[key.captured] = Ben.encodeStr(peersValue.captured).toByteArray()
+            ImmediateFuture{Unit}
         }
         every { memoryDB.statsCreate(capture(key), capture(statsValue)) } answers {
             if(statsStorage.containsKey(key.captured)) throw IllegalStateException()
             statsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
+            ImmediateFuture{Unit}
         }
 
         every { memoryDB.torrentsUpdate(capture(key), capture(torrentsValue)) } answers {
             if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
+            ImmediateFuture{Unit}
         }
         every { memoryDB.peersUpdate(capture(key), capture(peersValue)) } answers {
             if(!peersStorage.containsKey(key.captured)) throw IllegalArgumentException()
             peersStorage[key.captured] = Ben.encodeStr(peersValue.captured).toByteArray()
+            ImmediateFuture{Unit}
         }
         every { memoryDB.statsUpdate(capture(key), capture(statsValue)) } answers {
             if(!statsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             statsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
+            ImmediateFuture{Unit}
         }
 
         every { memoryDB.torrentsRead(capture(key)) } answers {
-            if(!statsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-            Ben(torrentsStorage[key.captured] as ByteArray).decode() as List<List<String>>? ?: throw IllegalArgumentException()
+            if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
+            Ben(torrentsStorage[key.captured] as ByteArray).decode() as? List<List<String>>? ?: throw IllegalArgumentException()
+            ImmediateFuture{Ben(torrentsStorage[key.captured] as ByteArray).decode() as List<List<String>>}
         }
         every { memoryDB.peersRead(capture(key)) } answers {
-            if(!statsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-            Ben(peersStorage[key.captured] as ByteArray).decode() as List<Map<String, String>>? ?: throw IllegalArgumentException()
+            if(!peersStorage.containsKey(key.captured)) throw IllegalArgumentException()
+            ImmediateFuture{Ben(peersStorage[key.captured] as ByteArray).decode() as? List<Map<String, String>> ?: throw IllegalArgumentException() }
         }
         every { memoryDB.statsRead(capture(key)) } answers {
             if(!statsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-            Ben(statsStorage[key.captured] as ByteArray).decode() as Map<String, Map<String, Any>>? ?: throw IllegalArgumentException()
+            ImmediateFuture{Ben(statsStorage[key.captured] as ByteArray).decode() as? Map<String, Map<String, Any>> ?: throw IllegalArgumentException() }
         }
 
         every { memoryDB.torrentsDelete(capture(key)) } answers {
             torrentsStorage.remove(key.captured) ?: throw IllegalArgumentException()
+            ImmediateFuture{Unit}
         }
         every { memoryDB.peersDelete(capture(key)) } answers {
             peersStorage.remove(key.captured) ?: throw IllegalArgumentException()
+            ImmediateFuture{Unit}
         }
         every { memoryDB.statsDelete(capture(key)) } answers {
             statsStorage.remove(key.captured) ?: throw IllegalArgumentException()
+            ImmediateFuture{Unit}
         }
         torrent = CourseTorrent(memoryDB)
-
         unmockkObject(Fuel)
     }
 
@@ -128,38 +140,38 @@ class CourseTorrentHW1Test {
     fun `announce call returns an exception for wrong infohash`() {
         assertThrows<java.lang.IllegalArgumentException> {
             runWithTimeout(Duration.ofSeconds(10)){
-            torrent.announce("invalid metainfo file", TorrentEvent.STARTED, 0, 0, 0) }}
+            torrent.announce("invalid metainfo file", TorrentEvent.STARTED, 0, 0, 0).get() }}
     }
 
     @Test
     fun `announce call returns an exception for negative values for request params`() {
-        val infohash = torrent.load(debian)
+        val infohash = torrent.load(debian).get()
         mockHttp(mapOf("failure reason" to "Negative parameters"))
         assertThrows<TrackerException> {
             runWithTimeout(Duration.ofSeconds(10)){
-                torrent.announce(infohash, TorrentEvent.STARTED, -1, 0, 0) }
+                torrent.announce(infohash, TorrentEvent.STARTED, -1, 0, 0).get() }
         }
         assertThrows<TrackerException> {
             runWithTimeout(Duration.ofSeconds(10)){
-                torrent.announce(infohash, TorrentEvent.STARTED, -1, -1, 0)
+                torrent.announce(infohash, TorrentEvent.STARTED, -1, -1, 0).get()
             }
         }
         assertThrows<TrackerException> {
             runWithTimeout(Duration.ofSeconds(10)){
-                torrent.announce(infohash, TorrentEvent.STARTED, -1, 0, -1)
+                torrent.announce(infohash, TorrentEvent.STARTED, -1, 0, -1).get()
             }
         }
     }
 
     @Test
     fun `failed announce call still updates the stats DB`() {
-        val infohash = torrent.load(lame) //this torrent has a bad tracker
+        val infohash = torrent.load(lame).get() //this torrent has a bad tracker
         assertThrows<TrackerException> {
             runWithTimeout(Duration.ofSeconds(10)){
-                torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 0)
+                torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 0).get()
             }
         }
-        val stats = torrent.trackerStats(infohash)
+        val stats = torrent.trackerStats(infohash).get()
         assert(stats.isNotEmpty())
     }
 
@@ -168,35 +180,35 @@ class CourseTorrentHW1Test {
         //with a big list, there is almost no chance the shuffled list will be the same
         //the exact probability that this test will fail is 1 / (length of list)! = 1 / (24!) = 1.6e-24
         mockHttp(mapOf("failure reason" to "Service unavailable"))
-        val infohash = torrent.load(lame_big_list)
-        val annouceListBefore = torrent.announces(infohash)
+        val infohash = torrent.load(lame_big_list).get()
+        val annouceListBefore = torrent.announces(infohash).join()
 
         assertThrows<TrackerException> {
-            torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 0)
+            torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 0).get()
         }
 
-        val annouceListAfter = torrent.announces(infohash)
+        val annouceListAfter = torrent.announces(infohash).join()
         assertThat(annouceListBefore, equalTo(annouceListAfter).not())
         /* Assertion to verify the the announce list was shuffled */
     }
 
     @Test
     fun `announce request updates the peers DB`() {
-        val infohash = torrent.load(debian)
+        val infohash = torrent.load(debian).get()
 
-        val interval = torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 0)
+        val interval = torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 0).get()
 
-        val peers = torrent.knownPeers(infohash)
+        val peers = torrent.knownPeers(infohash).get()
         assert(peers.isNotEmpty())
         /* Assertion to verify the peers list is not empty */
     }
 
     @Test
     fun `client announces to tracker debian`() {
-        val infohash = torrent.load(debian)
+        val infohash = torrent.load(debian).get()
 
         /* interval is 360 */
-        val interval = torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 0)
+        val interval = torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 0).get()
 
         assertThat(interval, equalTo(900))
         /* Assertion to verify that the tracker was actually called */
@@ -204,11 +216,11 @@ class CourseTorrentHW1Test {
 
     @Test
     fun `correct announces updates the stats DB`() {
-        val infohash = torrent.load(ubuntu)
+        val infohash = torrent.load(ubuntu).get()
 
-        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 0)
+        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 0).get()
 
-        val stats = torrent.trackerStats(infohash)
+        val stats = torrent.trackerStats(infohash).get()
         assert(stats.isNotEmpty())
         /* Assertion to verify that the tracker was actually called */
     }
@@ -216,25 +228,25 @@ class CourseTorrentHW1Test {
     @Test
     fun `wrong announce change stats data from Scrape type to Failure type`() {
         mockHttp(mapOf("files" to mapOf("myinfohash" to mapOf("complete" to 0, "incomplete" to 0, "downloaded" to 0))))
-        val infohash = torrent.load(lame)
+        val infohash = torrent.load(lame).get()
 
         /* Tracker has infohash, 0 complete, 0 downloaded, 0 incomplete, no name key */
-        assertDoesNotThrow { torrent.scrape(infohash) }
+        assertDoesNotThrow { torrent.scrape(infohash).join() }
 
         runWithTimeout(Duration.ofSeconds(10)){
             assertThat(
-                torrent.trackerStats(infohash),
+                torrent.trackerStats(infohash).get(),
                 equalTo(mapOf(Pair("https://127.0.0.1:8082/announce", Scrape(0, 0, 0, null) as ScrapeData)))
             )
         }
 
         mockHttp(mapOf("failure reason" to "invalid parameters"))
 
-        assertThrows<TrackerException> { torrent.announce(infohash, TorrentEvent.STARTED, -1, 0, 0) }
+        assertThrows<TrackerException> { torrent.announce(infohash, TorrentEvent.STARTED, -1, 0, 0).get() }
 
 
         assert(
-            torrent.trackerStats(infohash).get("https://127.0.0.1:8082/announce") is Failure
+            torrent.trackerStats(infohash).get().get("https://127.0.0.1:8082/announce") is Failure
         )
 
         /* Assertion to verify that the tracker was actually called */    }
@@ -244,7 +256,7 @@ class CourseTorrentHW1Test {
         mockHttp(mapOf("interval" to 360, "complete" to 0, "incomplete" to 0, "tracker id" to "1234",
                 "peers" to ubyteArrayOf(127u, 0u, 0u, 22u, 26u, 231u, 127u, 0u, 0u, 21u, 26u, 233u).toByteArray()))
 
-        val infohash = torrent.load(lame)
+        val infohash = torrent.load(lame).get()
 
         /* Returned peer list is: [("127.0.0.22", 6887)] */
         torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360)
@@ -253,20 +265,20 @@ class CourseTorrentHW1Test {
 
         runWithTimeout(Duration.ofSeconds(10)) {
             assertThat(
-                    torrent.knownPeers(infohash),
+                    torrent.knownPeers(infohash).get(),
                     anyElement(has(KnownPeer::ip, equalTo("127.0.0.22")) and has(KnownPeer::port, equalTo(6887)))
             )
         }
         runWithTimeout(Duration.ofSeconds(10)) {
             assertThat(
-                    torrent.knownPeers(infohash),
+                    torrent.knownPeers(infohash).get(),
                     anyElement(has(KnownPeer::ip, equalTo("127.0.0.21")) and has(KnownPeer::port, equalTo(6889)))
             )
         }
 
         runWithTimeout(Duration.ofSeconds(10)) {
             assertThat(
-                    torrent.knownPeers(infohash), equalTo(torrent.knownPeers(infohash).distinct())
+                    torrent.knownPeers(infohash).get(), equalTo(torrent.knownPeers(infohash).get().distinct())
             )
         }
     }
@@ -280,13 +292,13 @@ class CourseTorrentHW1Test {
                         mapOf("peer id" to "4", "ip" to "127.0.0.4", "port" to "144")
                 )))
 
-        val infohash = torrent.load(lame)
+        val infohash = torrent.load(lame).get()
 
-        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360)
+        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360).get()
 
         runWithTimeout(Duration.ofSeconds(10)) {
             assertThat(
-                    torrent.knownPeers(infohash),
+                    torrent.knownPeers(infohash).get(),
                     equalTo(listOf(
                             KnownPeer("127.0.0.2", 122, "2"),
                             KnownPeer("127.0.0.3", 133, "3"),
@@ -305,13 +317,13 @@ class CourseTorrentHW1Test {
                         mapOf("peer id" to "3", "ip" to "127.0.0.3", "port" to "133")
                 )))
 
-        val infohash = torrent.load(lame)
+        val infohash = torrent.load(lame).get()
 
-        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360)
+        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360).get()
 
         runWithTimeout(Duration.ofSeconds(10)) {
             assertThat(
-                    torrent.trackerStats(infohash),
+                    torrent.trackerStats(infohash).get(),
                     equalTo(mapOf<String, ScrapeData>(
                             "https://127.0.0.1:8082/announce" to Scrape(12, 0, 24, null)
                     ))
@@ -322,7 +334,7 @@ class CourseTorrentHW1Test {
     @Test
     fun `multiple announce calls merge peers lists`() {
 
-        val infohash = torrent.load(lame)
+        val infohash = torrent.load(lame).get()
 
         mockHttp(mapOf("interval" to 360, "complete" to 0, "incomplete" to 0, "tracker id" to "1234",
                 "peers" to listOf(
@@ -330,7 +342,7 @@ class CourseTorrentHW1Test {
                         mapOf("peer id" to "2", "ip" to "127.0.0.2", "port" to "122"),
                         mapOf("peer id" to "4", "ip" to "127.0.0.4", "port" to "144")
                 )))
-        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360)
+        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360).get()
 
         mockHttp(mapOf("interval" to 360, "complete" to 0, "incomplete" to 0, "tracker id" to "1234",
                 "peers" to listOf(
@@ -338,11 +350,11 @@ class CourseTorrentHW1Test {
                         mapOf("peer id" to "2", "ip" to "127.0.0.2", "port" to "122"),
                         mapOf("peer id" to "4", "ip" to "127.0.0.4", "port" to "144")
                 )))
-        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360)
+        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360).get()
 
         runWithTimeout(Duration.ofSeconds(10)) {
             assertThat(
-                    torrent.knownPeers(infohash),
+                    torrent.knownPeers(infohash).get(),
                     equalTo(listOf(
                             KnownPeer("127.0.0.1", 111, "1"),
                             KnownPeer("127.0.0.2", 122, "2"),
@@ -357,13 +369,13 @@ class CourseTorrentHW1Test {
 
     @Test
     fun `client scrapes tracker and updates statistics`() {
-        val infohash = torrent.load(ubuntu)
+        val infohash = torrent.load(ubuntu).get()
 
         /* Tracker has infohash, 0 complete, 0 downloaded, 0 incomplete, no name key */
-        assertDoesNotThrow { torrent.scrape(infohash) }
+        assertDoesNotThrow { torrent.scrape(infohash).join() }
 
         runWithTimeout(Duration.ofSeconds(10)){
-            val stats = torrent.trackerStats(infohash)
+            val stats = torrent.trackerStats(infohash).get()
             assertThat(stats.size, equalTo(2))
             assert({
                 var found = false
@@ -381,7 +393,7 @@ class CourseTorrentHW1Test {
         /* Tracker has infohash, 0 complete, 0 downloaded, 0 incomplete, no name key */
         assertThrows<java.lang.IllegalArgumentException> {
             runWithTimeout(Duration.ofSeconds(10)){
-                torrent.scrape("wrong infohash")
+                torrent.scrape("wrong infohash").join()
             }
         }
 
@@ -393,18 +405,18 @@ class CourseTorrentHW1Test {
         mockHttp(mapOf("interval" to 360, "complete" to 0, "incomplete" to 0, "tracker id" to "1234",
                 "peers" to ubyteArrayOf(127u, 0u, 0u, 22u, 26u, 231u, 127u, 0u, 0u, 21u, 26u, 233u).toByteArray()))
 
-        val infohash = torrent.load(lame)
+        val infohash = torrent.load(lame).get()
         /* Returned peer list is: [("127.0.0.22", 6887)] */
-        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360)
+        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360).get()
 
         /* Returned peer list is: [("127.0.0.22", 6887), ("127.0.0.21", 6889)] */
-        torrent.announce(infohash, TorrentEvent.REGULAR, 0, 81920, 2621440)
+        torrent.announce(infohash, TorrentEvent.REGULAR, 0, 81920, 2621440).get()
 
-        torrent.invalidatePeer(infohash, KnownPeer("127.0.0.22", 6887, null))
+        torrent.invalidatePeer(infohash, KnownPeer("127.0.0.22", 6887, null)).get()
 
         runWithTimeout(Duration.ofSeconds(10)) {
             assertThat(
-                    torrent.knownPeers(infohash),
+                    torrent.knownPeers(infohash).get(),
                     anyElement(has(KnownPeer::ip, equalTo("127.0.0.22")) and has(KnownPeer::port, equalTo(6887))).not()
             )
         }
@@ -414,7 +426,7 @@ class CourseTorrentHW1Test {
     fun `invalidate peer will throw exception for wrong infohash`() {
         assertThrows<java.lang.IllegalArgumentException> {
             runWithTimeout(Duration.ofSeconds(10)) {
-                torrent.invalidatePeer("wrong infohash", KnownPeer("127.1.1.23", 6887, null))
+                torrent.invalidatePeer("wrong infohash", KnownPeer("127.1.1.23", 6887, null)).get()
             }
         }
     }
@@ -424,28 +436,28 @@ class CourseTorrentHW1Test {
         mockHttp(mapOf("interval" to 360, "complete" to 0, "incomplete" to 0, "tracker id" to "1234",
                 "peers" to ubyteArrayOf(127u, 0u, 0u, 22u, 26u, 231u, 127u, 0u, 0u, 21u, 26u, 233u).toByteArray()))
 
-        val infohash = torrent.load(lame)
+        val infohash = torrent.load(lame).get()
         /* Returned peer list is: [("127.0.0.22", 6887)] */
-        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360)
+        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360).get()
         /* Returned peer list is: [("127.0.0.22", 6887), ("127.0.0.21", 6889)] */
-        torrent.announce(infohash, TorrentEvent.REGULAR, 0, 81920, 2621440)
+        torrent.announce(infohash, TorrentEvent.REGULAR, 0, 81920, 2621440).get()
         /* nothing should happend to the list */
-        torrent.invalidatePeer(infohash, KnownPeer("127.1.1.23", 6887, null))
+        torrent.invalidatePeer(infohash, KnownPeer("127.1.1.23", 6887, null)).get()
 
         assertThat(
-            torrent.knownPeers(infohash),
+            torrent.knownPeers(infohash).get(),
             anyElement(has(KnownPeer::port, equalTo(6887)) or has(KnownPeer::port, equalTo(6889)))
         )
     }
 
     @Test
     fun `trackerStats call throws exception for wrong infohash`() {
-        assertThrows<java.lang.IllegalArgumentException> { torrent.trackerStats("wrong infohash") }
+        assertThrows<java.lang.IllegalArgumentException> { torrent.trackerStats("wrong infohash").get() }
     }
 
     @Test
     fun `trackerStats are stored correctly`() {
-        val infohash = torrent.load(ubuntu)
+        val infohash = torrent.load(ubuntu).get()
 
         mockHttpStringStartsWith(listOf("https://torrent.ubuntu.com/announce" to mapOf("interval" to 360,
                 "complete" to 100,
@@ -454,16 +466,16 @@ class CourseTorrentHW1Test {
                 "peers" to listOf(
                         mapOf("peer id" to "3", "ip" to "127.0.0.3", "port" to "133")
                 ))))
-        torrent.announce(infohash, TorrentEvent.REGULAR, 0, 0, 2703360)
+        torrent.announce(infohash, TorrentEvent.REGULAR, 0, 0, 2703360).get()
 
         mockHttpStringStartsWith(listOf(
                 "https://torrent.ubuntu.com/scrape" to mapOf("failure reason" to "dude i failed"),
                 "https://ipv6.torrent.ubuntu.com/scrape" to mapOf("files" to mapOf("myinfohash" to
                 mapOf("complete" to 123, "incomplete" to 12, "downloaded" to 1234, "name" to "ubuntu")))))
-        torrent.scrape(infohash)
+        torrent.scrape(infohash).join()
 
         assertThat(
-                torrent.trackerStats(infohash),
+                torrent.trackerStats(infohash).get(),
                 equalTo(mapOf(
                         "https://torrent.ubuntu.com/announce" to Failure("dude i failed"),
                         "https://ipv6.torrent.ubuntu.com/announce" to Scrape(123, 1234, 12, "ubuntu")

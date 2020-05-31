@@ -22,13 +22,13 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     private val statsStorage : CompletableFuture<SecureStorage> = storageFactory.open("stats".toByteArray(charset))
 
     fun torrentsCreate(key: String, value: List<List<String>>) : CompletableFuture<Unit> {
-        return torrentsStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray())}
+        return torrentsStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray()).join()}
     }
     fun peersCreate(key: String, value: List<Map<String, String>>) : CompletableFuture<Unit> {
-        return peersStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray())}
+        return peersStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray()).join()}
     }
     fun statsCreate(key: String, value: Map<String, Map<String, Any>>) : CompletableFuture<Unit> {
-        return statsStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray())}
+        return statsStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray()).join()}
     }
 
     fun torrentsRead(key: String) : CompletableFuture<List<List<String>>> {
@@ -60,13 +60,13 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     }
 
     fun torrentsUpdate(key: String, value: List<List<String>>) : CompletableFuture<Unit> {
-        return torrentsStorage.thenApply { update(it, key, Ben.encodeStr(value).toByteArray())}
+        return torrentsStorage.thenApply { update(it, key, Ben.encodeStr(value).toByteArray()).join()}
     }
     fun peersUpdate(key: String, value: List<Map<String, String>>) : CompletableFuture<Unit> {
-        return peersStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray())}
+        return peersStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray()).join()}
     }
     fun statsUpdate(key: String, value: Map<String, Map<String, Any>>) : CompletableFuture<Unit> {
-        return statsStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray())}
+        return statsStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray()).join()}
     }
 
     fun torrentsDelete(key: String) : CompletableFuture<Unit> {

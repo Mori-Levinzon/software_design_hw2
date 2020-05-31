@@ -8,7 +8,7 @@ plugins {
 
 allprojects {
     repositories {
-        mavenCentral()
+        maven(url = "https://jitpack.io")
         jcenter()
     }
 
@@ -20,6 +20,8 @@ allprojects {
         set("mockkVersion", "1.9.3")
         set("externalLibraryVersion", "1.2.1")
         set("fuelVersion", "2.2.2")
+        set("kotlinFuturesVersion","1.2.0")
+        set("dokkaVersion","0.9.18")
 
     }
 }
@@ -27,13 +29,15 @@ allprojects {
 subprojects {
     apply(plugin = "kotlin")
 
-    val junitVersion: String? by extra
-
     dependencies {
+        val junitVersion: String? by extra
+        val kotlinFuturesVersion: String? by extra
         implementation(kotlin("stdlib-jdk8"))
         implementation(kotlin("reflect"))
 
         testImplementation("org.junit.jupiter", "junit-jupiter-engine", junitVersion)
+
+
     }
 
     tasks.withType<KotlinCompile> {

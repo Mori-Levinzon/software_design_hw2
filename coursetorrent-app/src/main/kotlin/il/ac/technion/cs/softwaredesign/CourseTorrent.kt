@@ -8,6 +8,7 @@ import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
 import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
 import java.util.concurrent.CompletableFuture
 import com.google.inject.Inject
+import java.time.Duration
 import java.util.concurrent.Future
 import kotlin.streams.toList
 
@@ -252,7 +253,42 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @throws IllegalArgumentException if [infohash] is not loaded.
      * @return Torrent statistics.
      */
-    fun torrentStats(infohash: String): CompletableFuture<TorrentStats> = TODO("Implement me!")
+    fun torrentStats(infohash: String): CompletableFuture<TorrentStats> {
+        var uploaded:Long = 0
+        var downloaded:Long = 0
+        var left:Long = 0
+        var wasted:Long = 0
+        var shareRatio:Double = 0.0
+        var pieces:Long = 0
+        var havePieces:Long = 0
+        var leechTime:Duration = Duration.ZERO
+        var seedTime:Duration = Duration.ZERO
+        return database.statsRead(infohash).thenApply { dbStatsMap ->
+            val trackerStatsMap = hashMapOf<String, ScrapeData>()
+            for ((trackerUrl, trackerValue) in dbStatsMap) {
+                val trackerMap = trackerValue as Map<String, Any>
+                if(trackerMap.containsKey("failure reason")) {
+                    trackerStatsMap[trackerUrl] = Failure(trackerMap["failure reason"] as String)
+                } else {
+                    trackerStatsMap[trackerUrl] = Scrape((trackerMap["complete"]as Long).toInt(),
+                        (trackerMap["downloaded"]as Long).toInt(),
+                        (trackerMap["incomplete"]as Long).toInt(),
+                        trackerMap["name"] as? String?)
+                }
+                uploaded += trackerMap?.get("uploaded") as? Long ?: 0
+                downloaded += trackerMap?.get("downloaded") as? Long ?: 0
+                left += trackerMap?.get("left") as? Long ?: 0
+                wasted += trackerMap?.get("wasted") as? Long ?: 0
+                shareRatio += trackerMap?.get("shareRatio") as? Long ?: 0
+                pieces += trackerMap?.get("pieces") as? Long ?: 0
+                havePieces += trackerMap?.get("havePieces") as? Long ?: 0
+                leechTime += trackerMap?.get("leechTime") as? Duration ?: Duration.ZERO
+                seedTime += trackerMap?.get("seedTime") as? Duration ?: Duration.ZERO
+            }
+
+            return@thenApply TorrentStats(uploaded,downloaded,left,wasted,shareRatio,pieces,havePieces,leechTime,seedTime)
+        }
+    }
 
     /**
      * Start listening for peer connections on a chosen port.
