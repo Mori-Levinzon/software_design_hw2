@@ -2,15 +2,17 @@
 
 package il.ac.technion.cs.softwaredesign
 
+import com.google.inject.Inject
 import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
 import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
-import java.util.concurrent.CompletableFuture
-import com.google.inject.Inject
+import java.net.ServerSocket
+import java.net.Socket
 import java.time.Duration
-import java.util.concurrent.Future
+import java.util.concurrent.CompletableFuture
 import kotlin.streams.toList
+
 
 /**
  * This is the class implementing CourseTorrent, a BitTorrent client.
@@ -21,7 +23,10 @@ import kotlin.streams.toList
  * + Communication with peers (downloading! uploading!)
  */
 class CourseTorrent @Inject constructor(private val database: SimpleDB) {
-    val alphaNumericID : String = Utils.getRandomChars(6)
+    private val alphaNumericID : String = Utils.getRandomChars(6)
+    private var serverSocket: ServerSocket? = null
+    private var serverSocketSubSocket: Socket? = null
+    private val connectedPeers : MutableMap<String, MutableList<ConnectedPeer>> = mutableMapOf()
     /**
      * Load in the torrent metainfo file from [torrent]. The specification for these files can be found here:
      * [Metainfo File Structure](https://wiki.theory.org/index.php/BitTorrentSpecification#Metainfo_File_Structure).
@@ -63,6 +68,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 .thenApply { peersDeleteFuture -> peersDeleteFuture ?: throw IllegalArgumentException("Infohash doesn't exist") }
                 .thenCompose {database.statsDelete(infohash) }
                 .thenApply { statsDeleteFuture -> statsDeleteFuture ?: throw IllegalArgumentException("Infohash doesn't exist") }
+                .thenApply { this.connectedPeers.remove(infohash) }
     }
 
     /**
@@ -302,7 +308,13 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      *
      * @throws IllegalStateException If already listening.
      */
-    fun start(): CompletableFuture<Unit> = TODO("Implement me!")
+    fun start(): CompletableFuture<Unit> {
+        return CompletableFuture.supplyAsync {
+            if(this.serverSocket != null) throw java.lang.IllegalStateException("Already listening")
+            this.serverSocket = ServerSocket(6881)
+            this.serverSocketSubSocket = this.serverSocket?.accept()
+        }
+    }
 
     /**
      * Disconnect from all connected peers, and stop listening for new peer connections
@@ -313,7 +325,18 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      *
      * @throws IllegalStateException If not listening.
      */
-    fun stop(): CompletableFuture<Unit> = TODO("Implement me!")
+    fun stop(): CompletableFuture<Unit> {
+        return CompletableFuture.supplyAsync {
+            if(this.serverSocket == null) throw java.lang.IllegalStateException("Not listening")
+            this.connectedPeers.forEach { (infohash, peers) ->
+                peers.forEach { this.disconnect(infohash, it.knownPeer) }
+            }
+            this.serverSocketSubSocket?.close()
+            this.serverSocket?.close()
+            this.serverSocket = null
+            this.serverSocketSubSocket = null
+        }
+    }
 
     /**
      * Connect to [peer] using the peer protocol described in [BEP 003](http://bittorrent.org/beps/bep_0003.html).
@@ -339,7 +362,11 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @throws IllegalArgumentException if [infohash] is not loaded or [peer] is not known.
      * @throws PeerConnectException if the connection to [peer] failed (timeout, connection closed after handshake, etc.)
      */
-    fun connect(infohash: String, peer: KnownPeer): CompletableFuture<Unit> = TODO("Implement me!")
+    fun connect(infohash: String, peer: KnownPeer): CompletableFuture<Unit> {
+        return CompletableFuture.supplyAsync {
+            //TODO
+        }
+    }
 
     /**
      * Disconnect from [peer] by closing the connection.
@@ -350,7 +377,16 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      *
      * @throws IllegalArgumentException if [infohash] is not loaded or [peer] is not connected.
      */
-    fun disconnect(infohash: String, peer: KnownPeer): CompletableFuture<Unit> = TODO("Implement me!")
+    fun disconnect(infohash: String, peer: KnownPeer): CompletableFuture<Unit> {
+        return CompletableFuture.supplyAsync {
+            val connectedPeer = this.connectedPeers[infohash]?.filter {
+                connectedPeer -> connectedPeer.knownPeer == peer
+            }?.getOrNull(0) ?: throw java.lang.IllegalArgumentException("infohash or peer invalid")
+            //TODO actually close the connection (how?)
+            this.connectedPeers[infohash]?.remove(connectedPeer)
+            if(this.connectedPeers[infohash]?.isEmpty() ?: false) this.connectedPeers.remove(infohash)
+        }
+    }
 
     /**
      * Return a list of peers that this client is currently connected to, with some statistics.
@@ -361,7 +397,12 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      *
      * @throws IllegalArgumentException if [infohash] is not loaded.
      */
-    fun connectedPeers(infohash: String): CompletableFuture<List<ConnectedPeer>> = TODO("Implement me!")
+    fun connectedPeers(infohash: String): CompletableFuture<List<ConnectedPeer>> {
+        return CompletableFuture.supplyAsync {
+            //TODO: perhaps compute average speed here?
+            this.connectedPeers.values.flatten()
+        }
+    }
 
     /**
      * Send a choke message to [peer], which is currently connected. Future calls to [connectedPeers] should show that
@@ -371,7 +412,11 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      *
      * @throws IllegalArgumentException if [infohash] is not loaded or [peer] is not connected.
      */
-    fun choke(infohash: String, peer: KnownPeer): CompletableFuture<Unit> = TODO("Implement me!")
+    fun choke(infohash: String, peer: KnownPeer): CompletableFuture<Unit> {
+        return CompletableFuture.supplyAsync {
+            //TODO
+        }
+    }
 
     /**
      * Send an unchoke message to [peer], which is currently connected. Future calls to [connectedPeers] should show
