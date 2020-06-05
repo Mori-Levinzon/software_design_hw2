@@ -40,6 +40,16 @@ class Utils {
             return myHex
         }
 
+        fun infohashToByteArray(str:String):ByteArray {
+            val allowedChars : List<Char> = ('a'..'z') + ('A'..'Z') + ('0'..'9') + ('.') + ('-') + ('_') + ('~')
+            val strHexByteArray = UByteArray(str.length / 2)
+            for(i in str.indices step 2) {
+                val byte = str.substring(i, i+2)
+                strHexByteArray[i/2] = byte.toUByte(radix = 16)
+            }
+            return strHexByteArray.toByteArray()
+        }
+
         fun getRandomChars(length: Int):String {
             if(length < 0) throw IllegalArgumentException();
             val allowedChars : List<Char> = ('a'..'z') + ('A'..'Z') + ('0'..'9')

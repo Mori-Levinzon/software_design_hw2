@@ -7,6 +7,7 @@ import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
 import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
+import java.lang.Exception
 import java.net.ServerSocket
 import java.net.Socket
 import java.time.Duration
@@ -26,7 +27,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
     private val alphaNumericID : String = Utils.getRandomChars(6)
     private var serverSocket: ServerSocket? = null
     private var serverSocketSubSocket: Socket? = null
-    private val connectedPeers : MutableMap<String, MutableList<ConnectedPeer>> = mutableMapOf()
+    private val connectedPeers : MutableMap<String, MutableList<ConnectedPeerManager>> = mutableMapOf()
     /**
      * Load in the torrent metainfo file from [torrent]. The specification for these files can be found here:
      * [Metainfo File Structure](https://wiki.theory.org/index.php/BitTorrentSpecification#Metainfo_File_Structure).
@@ -329,7 +330,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         return CompletableFuture.supplyAsync {
             if(this.serverSocket == null) throw java.lang.IllegalStateException("Not listening")
             this.connectedPeers.forEach { (infohash, peers) ->
-                peers.forEach { this.disconnect(infohash, it.knownPeer) }
+                peers.forEach { this.disconnect(infohash, it.connectedPeer.knownPeer) }
             }
             this.serverSocketSubSocket?.close()
             this.serverSocket?.close()
@@ -363,8 +364,53 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @throws PeerConnectException if the connection to [peer] failed (timeout, connection closed after handshake, etc.)
      */
     fun connect(infohash: String, peer: KnownPeer): CompletableFuture<Unit> {
-        return CompletableFuture.supplyAsync {
-            //TODO
+        return this.knownPeers(infohash).thenApply {
+            if (!it.contains(peer)) throw java.lang.IllegalArgumentException("Peer unknown")
+
+            try {
+                //get infohash as byte array
+                val infohashByteArray = Utils.infohashToByteArray(infohash)
+                //connect to peer
+                val s = Socket(peer.ip, peer.port)
+                //send handshake request
+                s.getOutputStream().write(WireProtocolEncoder.handshake(infohashByteArray,
+                        this.getPeerID().toByteArray()))
+                //receive handshake
+                val receivedMessage = ByteArray(68)
+                s.getInputStream().read(receivedMessage) //TODO I assume this is blocking, if it isn't - do busy wait
+                if(receivedMessage[0] != 19.toByte()) throw PeerConnectException("First byte is not 19")
+                val decodedHandshake = WireProtocolDecoder.handshake(receivedMessage)
+                if(!decodedHandshake.infohash.contentEquals(infohashByteArray))
+                    throw PeerConnectException("Infohashes do not agree")
+                //send bitfield message
+                //TODO If this torrent has anything downloaded, send a bitfield message.
+                //receive bitfield message
+                Thread.sleep(100) //TODO maybe runwithtimeout instead of waiting
+                //TODO Wait 100ms, and in that time handle any bitfield or have messages that are received.
+                //update known peers with peer id
+                val listKnownPeers = it.toMutableList()
+                listKnownPeers.remove(peer)
+                val newPeer = KnownPeer(peer.ip, peer.port, decodedHandshake.peerId.toString())
+                listKnownPeers.add(newPeer)
+                database.peersUpdate(infohash, listKnownPeers.map { kPeer ->
+                    if (kPeer.peerId == null)
+                        return@map mapOf("ip" to kPeer.ip, "port" to kPeer.port.toString())
+                    else
+                        return@map mapOf("ip" to kPeer.ip, "port" to kPeer.port.toString(), "peer id" to kPeer.peerId)
+                })
+                //update connectedPeers
+                if(this.connectedPeers.containsKey(infohash))
+                    this.connectedPeers[infohash]?.add(ConnectedPeerManager(
+                            ConnectedPeer(newPeer, true, false, true, false,
+                                    0.0, 0.0),
+                            s))
+            }
+            catch (e: Exception) {
+                e.printStackTrace()
+                throw PeerConnectException("Peer connection failed")
+            }
+
+
         }
     }
 
@@ -380,9 +426,9 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
     fun disconnect(infohash: String, peer: KnownPeer): CompletableFuture<Unit> {
         return CompletableFuture.supplyAsync {
             val connectedPeer = this.connectedPeers[infohash]?.filter {
-                connectedPeer -> connectedPeer.knownPeer == peer
+                connectedPeer -> connectedPeer.connectedPeer.knownPeer == peer
             }?.getOrNull(0) ?: throw java.lang.IllegalArgumentException("infohash or peer invalid")
-            //TODO actually close the connection (how?)
+            connectedPeer.socket.close()
             this.connectedPeers[infohash]?.remove(connectedPeer)
             if(this.connectedPeers[infohash]?.isEmpty() ?: false) this.connectedPeers.remove(infohash)
         }
@@ -400,7 +446,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
     fun connectedPeers(infohash: String): CompletableFuture<List<ConnectedPeer>> {
         return CompletableFuture.supplyAsync {
             //TODO: perhaps compute average speed here?
-            this.connectedPeers.values.flatten()
+            this.connectedPeers.values.flatten().map { it -> it.connectedPeer }
         }
     }
 
@@ -414,7 +460,11 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      */
     fun choke(infohash: String, peer: KnownPeer): CompletableFuture<Unit> {
         return CompletableFuture.supplyAsync {
-            //TODO
+            val connectedPeer = this.connectedPeers[infohash]?.filter {
+                connectedPeer -> connectedPeer.connectedPeer.knownPeer == peer
+            }?.getOrNull(0) ?: throw java.lang.IllegalArgumentException("infohash or peer invalid")
+            connectedPeer.socket.getOutputStream().write(WireProtocolEncoder.encode(0))
+            connectedPeer.connectedPeer = connectedPeer.connectedPeer.copy(amChoking = true)
         }
     }
 
@@ -426,7 +476,15 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      *
      * @throws IllegalArgumentException if [infohash] is not loaded or [peer] is not connected.
      */
-    fun unchoke(infohash: String, peer: KnownPeer): CompletableFuture<Unit> = TODO("Implement me!")
+    fun unchoke(infohash: String, peer: KnownPeer): CompletableFuture<Unit> {
+        return CompletableFuture.supplyAsync {
+            val connectedPeer = this.connectedPeers[infohash]?.filter {
+                connectedPeer -> connectedPeer.connectedPeer.knownPeer == peer
+            }?.getOrNull(0) ?: throw java.lang.IllegalArgumentException("infohash or peer invalid")
+            connectedPeer.socket.getOutputStream().write(WireProtocolEncoder.encode(1))
+            connectedPeer.connectedPeer = connectedPeer.connectedPeer.copy(amChoking = false)
+        }
+    }
 
     /**
      * Handle any messages that peers have sent, and send keep-alives if needed, as well as interested/not interested
