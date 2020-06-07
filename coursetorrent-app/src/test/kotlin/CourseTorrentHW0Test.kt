@@ -35,7 +35,7 @@ class CourseTorrentHW0Test {
         var statsValue = slot<Map<String, Map<String, Any>>>()
 
 
-        every { memoryDB.torrentsCreate(capture(key), capture(torrentsValue)) } answers {
+        every { memoryDB.announcesCreate(capture(key), capture(torrentsValue)) } answers {
             if(torrentsStorage.containsKey(key.captured)) throw IllegalStateException()
             torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
             ImmediateFuture{Unit}
@@ -51,7 +51,7 @@ class CourseTorrentHW0Test {
             ImmediateFuture{Unit}
         }
 
-        every { memoryDB.torrentsUpdate(capture(key), capture(torrentsValue)) } answers {
+        every { memoryDB.announcesUpdate(capture(key), capture(torrentsValue)) } answers {
             if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
             ImmediateFuture{Unit}
@@ -67,7 +67,7 @@ class CourseTorrentHW0Test {
             ImmediateFuture{Unit}
         }
 
-        every { memoryDB.torrentsRead(capture(key)) } answers {
+        every { memoryDB.announcesRead(capture(key)) } answers {
             if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             Ben(torrentsStorage[key.captured] as ByteArray).decode() as? List<List<String>>? ?: throw IllegalArgumentException()
             ImmediateFuture{Ben(torrentsStorage[key.captured] as ByteArray).decode() as List<List<String>>}
@@ -81,7 +81,7 @@ class CourseTorrentHW0Test {
             ImmediateFuture{Ben(statsStorage[key.captured] as ByteArray).decode() as? Map<String, Map<String, Any>> ?: throw IllegalArgumentException()}
         }
 
-        every { memoryDB.torrentsDelete(capture(key)) } answers {
+        every { memoryDB.announcesDelete(capture(key)) } answers {
             torrentsStorage.remove(key.captured) ?: throw IllegalArgumentException()
             ImmediateFuture{Unit}
         }

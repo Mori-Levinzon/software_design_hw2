@@ -14,13 +14,8 @@ import io.mockk.*
 import org.junit.jupiter.api.*
 import java.lang.IllegalArgumentException
 import java.lang.IllegalStateException
-import java.net.Socket
 import java.util.concurrent.CompletionException
-import com.natpryce.hamkrest.*
-import com.natpryce.hamkrest.assertion.assertThat
-import dev.misfitlabs.kotlinguice4.getInstance
 import io.github.vjames19.futures.jdk8.ImmediateFuture
-import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertDoesNotThrow
 import org.junit.jupiter.api.assertThrows
@@ -44,7 +39,7 @@ class MockedCourseTorrentStaffTest {
         var statsValue = slot<Map<String, Map<String, Any>>>()
 
 
-        every { memoryDB.torrentsCreate(capture(key), capture(torrentsValue)) } answers {
+        every { memoryDB.announcesCreate(capture(key), capture(torrentsValue)) } answers {
             if(torrentsStorage.containsKey(key.captured)) throw IllegalStateException()
             torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
             ImmediateFuture{Unit}
@@ -60,7 +55,7 @@ class MockedCourseTorrentStaffTest {
             ImmediateFuture{Unit}
         }
 
-        every { memoryDB.torrentsUpdate(capture(key), capture(torrentsValue)) } answers {
+        every { memoryDB.announcesUpdate(capture(key), capture(torrentsValue)) } answers {
             if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
             ImmediateFuture{Unit}
@@ -77,7 +72,7 @@ class MockedCourseTorrentStaffTest {
         }
 
         @Suppress("UNCHECKED_CAST")
-        every { memoryDB.torrentsRead(capture(key)) } answers {
+        every { memoryDB.announcesRead(capture(key)) } answers {
             if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             Ben(torrentsStorage[key.captured] as ByteArray).decode() as? List<List<String>>? ?: throw IllegalArgumentException()
             ImmediateFuture{Ben(torrentsStorage[key.captured] as ByteArray).decode() as List<List<String>>}
@@ -94,7 +89,7 @@ class MockedCourseTorrentStaffTest {
             ImmediateFuture{Ben(statsStorage[key.captured] as ByteArray).decode() as? Map<String, Map<String, Any>> ?: throw IllegalArgumentException()}
         }
 
-        every { memoryDB.torrentsDelete(capture(key)) } answers {
+        every { memoryDB.announcesDelete(capture(key)) } answers {
             torrentsStorage.remove(key.captured) ?: throw IllegalArgumentException()
             ImmediateFuture{Unit}
         }

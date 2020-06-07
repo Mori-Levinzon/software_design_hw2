@@ -20,7 +20,6 @@ import org.junit.jupiter.api.assertThrows
 import java.lang.IllegalArgumentException
 import java.lang.IllegalStateException
 import java.time.Duration
-import kotlin.or
 
 class CourseTorrentHW1Test {
     private val injector = Guice.createInjector(CourseTorrentModule())
@@ -43,7 +42,7 @@ class CourseTorrentHW1Test {
         var statsValue = slot<Map<String, Map<String, Any>>>()
 
 
-        every { memoryDB.torrentsCreate(capture(key), capture(torrentsValue)) } answers {
+        every { memoryDB.announcesCreate(capture(key), capture(torrentsValue)) } answers {
             if(torrentsStorage.containsKey(key.captured)) throw IllegalStateException()
             torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
             ImmediateFuture{Unit}
@@ -59,7 +58,7 @@ class CourseTorrentHW1Test {
             ImmediateFuture{Unit}
         }
 
-        every { memoryDB.torrentsUpdate(capture(key), capture(torrentsValue)) } answers {
+        every { memoryDB.announcesUpdate(capture(key), capture(torrentsValue)) } answers {
             if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
             ImmediateFuture{Unit}
@@ -75,7 +74,7 @@ class CourseTorrentHW1Test {
             ImmediateFuture{Unit}
         }
 
-        every { memoryDB.torrentsRead(capture(key)) } answers {
+        every { memoryDB.announcesRead(capture(key)) } answers {
             if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             Ben(torrentsStorage[key.captured] as ByteArray).decode() as? List<List<String>>? ?: throw IllegalArgumentException()
             ImmediateFuture{Ben(torrentsStorage[key.captured] as ByteArray).decode() as List<List<String>>}
@@ -89,7 +88,7 @@ class CourseTorrentHW1Test {
             ImmediateFuture{Ben(statsStorage[key.captured] as ByteArray).decode() as? Map<String, Map<String, Any>> ?: throw IllegalArgumentException() }
         }
 
-        every { memoryDB.torrentsDelete(capture(key)) } answers {
+        every { memoryDB.announcesDelete(capture(key)) } answers {
             torrentsStorage.remove(key.captured) ?: throw IllegalArgumentException()
             ImmediateFuture{Unit}
         }
