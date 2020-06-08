@@ -3,6 +3,7 @@
 package il.ac.technion.cs.softwaredesign
 
 import com.google.inject.Inject
+import com.sun.xml.internal.bind.v2.model.core.Element
 import il.ac.technion.cs.softwaredesign.Utils.Companion.sha1hash
 import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
@@ -15,6 +16,8 @@ import java.net.Socket
 import java.nio.ByteBuffer
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
+import java.util.stream.Collectors
+import java.util.stream.Stream
 import kotlin.streams.toList
 
 
@@ -408,7 +411,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     this.connectedPeers[infohash]?.add(ConnectedPeerManager(
                             ConnectedPeer(newPeer, true, false, true, false,
                                     0.0, 0.0),
-                            s))
+                            s, listOf<Long>().toMutableList(), listOf<Long>().toMutableList()))
             }
             catch (e: Exception) {
                 e.printStackTrace()
@@ -717,7 +720,19 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         infohash: String,
         perPeer: Long,
         startIndex: Long
-    ): CompletableFuture<Map<KnownPeer, List<Long>>> = TODO("Implement me!")
+    ): CompletableFuture<Map<KnownPeer, List<Long>>> {
+            return database.filesRead(infohash).thenApply { filesWeHaveMap ->
+                filesWeHaveMap ?: throw IllegalStateException("torrent does not exist")
+                this.connectedPeers[infohash]?.filter { connectedPeer -> !connectedPeer.connectedPeer.peerChoking }?.map { unchokedPeer ->
+                    val piecesWeWantFromPeer = unchokedPeer.availablePieces.filter { index -> !filesWeHaveMap.containsKey(index) }
+                    val indexBiggerOrEqualThanIndex = piecesWeWantFromPeer.filter { index -> index >= startIndex }.map { it -> it.toLong() as Long}.toMutableList()
+                    val indexSmallerThanIndex = piecesWeWantFromPeer.filter { index -> index < startIndex }.map { it -> it.toLong()  as Long}.toMutableList()
+                    indexBiggerOrEqualThanIndex.addAll(indexSmallerThanIndex)
+                    val peerAvailableList = indexBiggerOrEqualThanIndex.stream().limit(perPeer).toList()
+                    mapOf(unchokedPeer.connectedPeer.knownPeer to peerAvailableList)
+                }?.get(0)
+            }
+    }
 
     /**
      * List pieces that have been requested by (unchoked) peers.
@@ -730,7 +745,14 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      */
     fun requestedPieces(
         infohash: String
-    ): CompletableFuture<Map<KnownPeer, List<Long>>> = TODO("Implement me!")
+    ): CompletableFuture<Map<KnownPeer, List<Long>>> {
+        return database.announcesRead(infohash).thenApply {
+            it ?: throw IllegalStateException("torrent does not exist")
+            this.connectedPeers[infohash]?.filter { connectedPeer -> !connectedPeer.connectedPeer.amChoking }?.map { peer->
+                mapOf(peer.connectedPeer.knownPeer to peer.requestedPieces.map{ it -> it.toLong()}.toList())
+            }?.get(0)
+        }
+    }
 
     /**
      * Return the downloaded files for torrent [infohash].
@@ -743,7 +765,21 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @throws IllegalArgumentException if [infohash] is not loaded.
      * @return Mapping from file name to file contents.
      */
-    fun files(infohash: String): CompletableFuture<Map<String, ByteArray>> = TODO("Implement me!")
+    fun files(infohash: String): CompletableFuture<Map<String, ByteArray>> {
+        return database.filesRead(infohash).thenApply {
+            val filesThatALreadyBeenDOwnloadedMap= it.toMutableMap()
+            database.torrentsRead(infohash).thenApply {
+                val pieces = it["pieces"] as String
+                for (i in 0 until (pieces.length) step 20){
+                    val currentPiece =pieces.substring(i,i+20)//TODO: need to replace to his real name if its completely downloaded?
+                    if (! filesThatALreadyBeenDOwnloadedMap.containsKey(currentPiece)){//only for pieces that hasn't been downloaded
+                        filesThatALreadyBeenDOwnloadedMap[currentPiece] = ByteArray(0)
+                    }
+                }
+            }
+            filesThatALreadyBeenDOwnloadedMap
+        }
+    }
 
     /**
      * Load files into the client.
@@ -811,23 +847,5 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             }
             return peers
         }
-    }
-}
-
-class RequestMessage {
-    val MSG_ID = 6.toByte()
-
-    fun decode(bytes: ByteArray) {
-        if (bytes.size != 17 || bytes[4] != MSG_ID) throw IllegalArgumentException("Invalid RequestMessage")
-    }
-
-    fun encode(pieceIndex: Int, begin: Int, length: Int = 16384): ByteArray {
-        val buffer = ByteBuffer.allocate(17)
-        buffer.putInt(13)
-        buffer.put(MSG_ID)
-        buffer.putInt(pieceIndex)
-        buffer.putInt(begin)
-        buffer.putInt(length)
-        return buffer.array()
     }
 }
