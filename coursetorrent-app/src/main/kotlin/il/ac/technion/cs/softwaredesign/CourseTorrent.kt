@@ -13,12 +13,8 @@ import java.lang.Thread.sleep
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.ByteBuffer
-import java.sql.Time
 import java.time.Duration
-import java.time.LocalDateTime
 import java.util.concurrent.CompletableFuture
-import java.util.stream.Collectors
-import java.util.stream.Stream
 import kotlin.streams.toList
 
 
@@ -664,9 +660,9 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 torrent ?: throw IllegalStateException("torrent does not exist")
                 val info = torrent["info"] as Map<String, Any>
                 val pieces = info?.get("pieces") as String
-                database.filesRead(infohash).thenApply {filesMap->
+                database.piecesRead(infohash).thenApply { filesMap->
                     //reach the specific piece by its 20 bye sha1 hash value name
-                    val selectedPieceBlock = filesMap[pieces.substring(pieceIndex.toInt(),pieceIndex.toInt() +20 ) ] as ByteArray
+                    val selectedPieceBlock = filesMap[pieceIndex ] as ByteArray
 
                     val connectedPeer = this.connectedPeers[infohash]?.filter {
                         connectedPeer1 -> connectedPeer1.connectedPeer.knownPeer == peer
@@ -739,10 +735,10 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         perPeer: Long,
         startIndex: Long
     ): CompletableFuture<Map<KnownPeer, List<Long>>> {
-            return database.filesRead(infohash).thenApply { filesWeHaveMap ->
-                filesWeHaveMap ?: throw IllegalStateException("torrent does not exist")
+            return database.piecesRead(infohash).thenApply { piecesWeHaveMap ->
+                piecesWeHaveMap ?: throw IllegalStateException("torrent does not exist")
                 this.connectedPeers[infohash]?.filter { connectedPeer -> !connectedPeer.connectedPeer.peerChoking }?.map { unchokedPeer ->
-                    val piecesWeWantFromPeer = unchokedPeer.availablePieces.filter { index -> !filesWeHaveMap.containsKey(index) }
+                    val piecesWeWantFromPeer = unchokedPeer.availablePieces.filter { index -> !piecesWeHaveMap.containsKey(index) }
                     val indexBiggerOrEqualThanIndex = piecesWeWantFromPeer.filter { index -> index >= startIndex }.map { it -> it.toLong() as Long}.toMutableList()
                     val indexSmallerThanIndex = piecesWeWantFromPeer.filter { index -> index < startIndex }.map { it -> it.toLong()  as Long}.toMutableList()
                     indexBiggerOrEqualThanIndex.addAll(indexSmallerThanIndex)
@@ -784,18 +780,20 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @return Mapping from file name to file contents.
      */
     fun files(infohash: String): CompletableFuture<Map<String, ByteArray>> {
-        return database.filesRead(infohash).thenApply {
-            val filesThatALreadyBeenDOwnloadedMap= it.toMutableMap()
+        return database.piecesRead(infohash).thenApply {
+            val piecesThatAlreadyBeenDownloadedMap= it.toMutableMap()
             database.torrentsRead(infohash).thenApply {
                 val pieces = it["pieces"] as String
                 for (i in 0 until (pieces.length) step 20){
                     val currentPiece =pieces.substring(i,i+20)//TODO: need to replace to his real name if its completely downloaded?
-                    if (! filesThatALreadyBeenDOwnloadedMap.containsKey(currentPiece)){//only for pieces that hasn't been downloaded
-                        filesThatALreadyBeenDOwnloadedMap[currentPiece] = ByteArray(0)
+                    if (! piecesThatAlreadyBeenDownloadedMap.containsKey(currentPiece)){//only for pieces that hasn't been downloaded
+                        piecesThatAlreadyBeenDownloadedMap[currentPiece.toLong()] = ByteArray(0)
                     }
                 }
             }
-            filesThatALreadyBeenDOwnloadedMap
+            piecesThatAlreadyBeenDownloadedMap//TODO: fix it to hold names istead of indexes
+            val res: Map<String,ByteArray> = mutableMapOf()
+            res
         }
     }
 

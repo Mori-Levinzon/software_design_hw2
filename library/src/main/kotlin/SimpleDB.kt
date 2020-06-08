@@ -21,7 +21,7 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     private val announcesStorage : CompletableFuture<SecureStorage> = storageFactory.open("announces".toByteArray(charset))
     private val peersStorage : CompletableFuture<SecureStorage> = storageFactory.open("peers".toByteArray(charset))
     private val statsStorage : CompletableFuture<SecureStorage> = storageFactory.open("stats".toByteArray(charset))
-    private val filesStorage : CompletableFuture<SecureStorage> = storageFactory.open("files".toByteArray(charset))
+    private val piecesStorage : CompletableFuture<SecureStorage> = storageFactory.open("pieces".toByteArray(charset))
 
     fun torrentsCreate(key: String, value: Map<String, Any>) : CompletableFuture<Unit> {
         return torrentsStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray()).join()}
@@ -35,8 +35,8 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     fun statsCreate(key: String, value: Map<String, Map<String, Any>>) : CompletableFuture<Unit> {
         return statsStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray()).join()}
     }
-    fun filesCreate(key: String, value: Map<String, ByteArray>) : CompletableFuture<Unit> {
-        return filesStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray()).join()}
+    fun piecesCreate(key: String, value: Map<Long, ByteArray>) : CompletableFuture<Unit> {
+        return piecesStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray()).join()}
     }
 
     fun torrentsRead(key: String) : CompletableFuture<Map<String, Any>> {
@@ -77,11 +77,11 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
             }
     }
 
-    fun filesRead(key: String) : CompletableFuture<Map<String, ByteArray>> {
-        return filesStorage.thenApply { read(it,key) }
+    fun piecesRead(key: String) : CompletableFuture<Map<Long, ByteArray>> {
+        return piecesStorage.thenApply { read(it,key) }
                 .thenCompose { dbContent ->  dbContent }//to extract the value from the CompletableFuture
                 .thenApply {dbContent->
-                    dbContent?.let { Ben(dbContent).decode() } as? Map<String, ByteArray>
+                    dbContent?.let { Ben(dbContent).decode() } as? Map<Long, ByteArray>
                             ?: throw IllegalStateException("Database contents disobey type rules")
                 }
     }
@@ -98,8 +98,8 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     fun statsUpdate(key: String, value: Map<String, Map<String, Any>>) : CompletableFuture<Unit> {
         return statsStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray())}
     }
-    fun filesUpdate(key: String, value: Map<String, ByteArray>) : CompletableFuture<Unit> {
-        return filesStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray())}
+    fun piecesUpdate(key: String, value: Map<Long, ByteArray>) : CompletableFuture<Unit> {
+        return piecesStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray())}
     }
 
     fun torrentsDelete(key: String) : CompletableFuture<Unit> {
@@ -114,8 +114,8 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     fun statsDelete(key: String) : CompletableFuture<Unit> {
         return statsStorage.thenApply { delete(it, key) }
     }
-    fun filesDelete(key: String) : CompletableFuture<Unit> {
-        return filesStorage.thenApply { delete(it, key) }
+    fun piecesDelete(key: Long) : CompletableFuture<Unit> {
+        return piecesStorage.thenApply { delete(it, key.toString()) }
     }
 
 
