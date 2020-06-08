@@ -3,7 +3,6 @@
 package il.ac.technion.cs.softwaredesign
 
 import com.google.inject.Inject
-import com.sun.xml.internal.bind.v2.model.core.Element
 import il.ac.technion.cs.softwaredesign.Utils.Companion.sha1hash
 import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
@@ -14,7 +13,9 @@ import java.lang.Thread.sleep
 import java.net.ServerSocket
 import java.net.Socket
 import java.nio.ByteBuffer
+import java.sql.Time
 import java.time.Duration
+import java.time.LocalDateTime
 import java.util.concurrent.CompletableFuture
 import java.util.stream.Collectors
 import java.util.stream.Stream
@@ -32,8 +33,8 @@ import kotlin.streams.toList
 class CourseTorrent @Inject constructor(private val database: SimpleDB) {
     private val alphaNumericID : String = Utils.getRandomChars(6)
     private var serverSocket: ServerSocket? = null
-    private var serverSocketSubSocket: Socket? = null
     private val connectedPeers : MutableMap<String, MutableList<ConnectedPeerManager>> = mutableMapOf()
+    private var lastTimeKeptAlive = System.currentTimeMillis()
     /**
      * Load in the torrent metainfo file from [torrent]. The specification for these files can be found here:
      * [Metainfo File Structure](https://wiki.theory.org/index.php/BitTorrentSpecification#Metainfo_File_Structure).
@@ -321,7 +322,6 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         return CompletableFuture.supplyAsync {
             if(this.serverSocket != null) throw java.lang.IllegalStateException("Already listening")
             this.serverSocket = ServerSocket(6881)
-            this.serverSocketSubSocket = this.serverSocket?.accept()
         }
     }
 
@@ -340,10 +340,8 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             this.connectedPeers.forEach { (infohash, peers) ->
                 peers.forEach { this.disconnect(infohash, it.connectedPeer.knownPeer) }
             }
-            this.serverSocketSubSocket?.close()
             this.serverSocket?.close()
             this.serverSocket = null
-            this.serverSocketSubSocket = null
         }
     }
 
@@ -393,7 +391,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 //send bitfield message
                 //TODO If this torrent has anything downloaded, send a bitfield message.
                 //receive bitfield message
-                Thread.sleep(100) //TODO maybe runwithtimeout instead of waiting
+                Thread.sleep(100) //TODO maybe withTimeout instead of waiting
                 //TODO Wait 100ms, and in that time handle any bitfield or have messages that are received.
                 //update known peers with peer id
                 val listKnownPeers = it.toMutableList()
@@ -524,7 +522,27 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      *
      * This is an *update* command. (maybe)
      */
-    fun handleSmallMessages(): CompletableFuture<Unit> = TODO("Implement me!")
+    fun handleSmallMessages(): CompletableFuture<Unit> {
+        return CompletableFuture.supplyAsync {
+            //receive messages
+            connectedPeers.forEach { infohash, lst ->
+                lst.forEach { peerManager -> peerManager.handleIncomingMessages() }
+            }
+            //TODO also deal with new connections
+            //send messages
+            val now = System.currentTimeMillis()
+            val timeElapsed = now - lastTimeKeptAlive
+            if (timeElapsed > 60 * 1000) {
+                connectedPeers.forEach { infohash, lst ->
+                    lst.forEach { peerManager -> peerManager.sendKeepAlive() }
+                }
+                lastTimeKeptAlive = now
+            }
+            /*connectedPeers.forEach { infohash, lst ->
+                lst.forEach { peerManager -> peerManager.decideIfInterested() }
+            }*/
+        }
+    }
 
     /**
      * Download piece number [pieceIndex] of the torrent identified by [infohash].
