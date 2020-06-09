@@ -4,6 +4,7 @@ package il.ac.technion.cs.softwaredesign
 
 import com.google.inject.Inject
 import com.sun.deploy.util.StringUtils
+import il.ac.technion.cs.softwaredesign.Utils.Companion.byteArrayToInfohash
 import il.ac.technion.cs.softwaredesign.Utils.Companion.sha1hash
 import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
@@ -376,10 +377,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 s.getOutputStream().write(WireProtocolEncoder.handshake(infohashByteArray,
                         this.getPeerID().toByteArray()))
                 //receive handshake
-                val receivedMessage = ByteArray(68)
-                s.getInputStream().read(receivedMessage) //TODO I assume this is blocking, if it isn't - do busy wait
-                if(receivedMessage[0] != 19.toByte()) throw PeerConnectException("First byte is not 19")
-                val decodedHandshake = WireProtocolDecoder.handshake(receivedMessage)
+                val decodedHandshake = receiveHandshake(s)
                 if(!decodedHandshake.infohash.contentEquals(infohashByteArray))
                     throw PeerConnectException("Infohashes do not agree")
                 //send bitfield message
@@ -522,7 +520,27 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             connectedPeers.forEach { infohash, lst ->
                 lst.forEach { peerManager -> peerManager.handleIncomingMessages() }
             }
-            //TODO also deal with new connections
+            fun newPeerAcceptor() {
+                val socket = serverSocket?.accept()
+                if(socket != null) {
+                    val decodedHandshake = this.receiveHandshake(socket)
+                    val newInfohash = byteArrayToInfohash(decodedHandshake.infohash)
+                    database.peersRead(newInfohash).exceptionally { exception ->
+                        listOf()
+                    }.thenApply { it ->
+                        if (it.isEmpty()) { //torrent does not exist
+                            socket.close()
+                            throw PeerConnectException("No such infohash")
+                        }
+                        else { //torrent exists
+                            //TODO new peer
+                            val knownPeer = KnownPeer(socket.inetAddress.hostAddress, socket.port, decodedHandshake.peerId.toString())
+                        }
+                    }
+                }
+                //TODO should we accept again?
+            }
+            CompletableFuture.supplyAsync({ newPeerAcceptor() })
             //send messages
             val now = System.currentTimeMillis()
             val timeElapsed = now - lastTimeKeptAlive
@@ -532,9 +550,11 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 }
                 lastTimeKeptAlive = now
             }
-            /*connectedPeers.forEach { infohash, lst ->
-                lst.forEach { peerManager -> peerManager.decideIfInterested() }
-            }*/
+            connectedPeers.forEach { infohash, lst ->
+                database.piecesRead(infohash).thenApply { piecesWeHaveMap ->
+                    lst.forEach { peerManager -> peerManager.decideIfInterested(piecesWeHaveMap) }
+                }
+            }
         }
     }
 
@@ -919,5 +939,13 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             }
             return peers
         }
+    }
+
+    private fun receiveHandshake(s : Socket) : DecodedHandshake {
+        val receivedMessage = ByteArray(68)
+        s.getInputStream().read(receivedMessage) //TODO I assume this is blocking, if it isn't - do busy wait
+        if(receivedMessage[0] != 19.toByte()) throw PeerConnectException("First byte is not 19")
+        val decodedHandshake = WireProtocolDecoder.handshake(receivedMessage)
+        return decodedHandshake
     }
 }

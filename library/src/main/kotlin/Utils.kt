@@ -50,6 +50,10 @@ class Utils {
             return strHexByteArray.toByteArray()
         }
 
+        fun byteArrayToInfohash(barr:ByteArray):String {
+            return barr.fold("", { str, it -> str + "%02x".format(it) })
+        }
+
         fun getRandomChars(length: Int):String {
             if(length < 0) throw IllegalArgumentException();
             val allowedChars : List<Char> = ('a'..'z') + ('A'..'Z') + ('0'..'9')
