@@ -49,7 +49,7 @@ class MockedCourseTorrentStaffTest {
             peersStorage[key.captured] = Ben.encodeStr(peersValue.captured).toByteArray()
             ImmediateFuture{Unit}
         }
-        every { memoryDB.statsCreate(capture(key), capture(statsValue)) } answers {
+        every { memoryDB.trackersStatsCreate(capture(key), capture(statsValue)) } answers {
             if(statsStorage.containsKey(key.captured)) throw IllegalStateException()
             statsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
             ImmediateFuture{Unit}
@@ -65,7 +65,7 @@ class MockedCourseTorrentStaffTest {
             peersStorage[key.captured] = Ben.encodeStr(peersValue.captured).toByteArray()
             ImmediateFuture{Unit}
         }
-        every { memoryDB.statsUpdate(capture(key), capture(statsValue)) } answers {
+        every { memoryDB.trackersStatsUpdate(capture(key), capture(statsValue)) } answers {
             if(!statsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             statsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
             ImmediateFuture{Unit}
@@ -84,7 +84,7 @@ class MockedCourseTorrentStaffTest {
             ImmediateFuture{Ben(peersStorage[key.captured] as ByteArray).decode() as? List<Map<String, String>> ?: throw IllegalArgumentException()}
         }
         @Suppress("UNCHECKED_CAST")
-        every { memoryDB.statsRead(capture(key)) } answers {
+        every { memoryDB.trackersStatsRead(capture(key)) } answers {
             if(!statsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             ImmediateFuture{Ben(statsStorage[key.captured] as ByteArray).decode() as? Map<String, Map<String, Any>> ?: throw IllegalArgumentException()}
         }
@@ -97,7 +97,7 @@ class MockedCourseTorrentStaffTest {
             peersStorage.remove(key.captured) ?: throw IllegalArgumentException()
             ImmediateFuture{Unit}
         }
-        every { memoryDB.statsDelete(capture(key)) } answers {
+        every { memoryDB.trackersStatsDelete(capture(key)) } answers {
             statsStorage.remove(key.captured) ?: throw IllegalArgumentException()
             ImmediateFuture{Unit}
         }

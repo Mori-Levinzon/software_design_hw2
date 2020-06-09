@@ -9,6 +9,7 @@ import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
 import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
+import il.ac.technion.cs.softwaredesign.il.ac.technion.cs.softwaredesign.PieceIndexStats
 import java.lang.Thread.sleep
 import java.net.ServerSocket
 import java.net.Socket
@@ -51,7 +52,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         }.thenCompose {
             database.peersCreate(infohash, listOf())
         }.thenCompose {
-            database.statsCreate(infohash, mapOf())
+            database.trackersStatsCreate(infohash, mapOf())
         }.thenCompose {
             database.piecesCreate(infohash, mapOf())
         }.thenCompose {
@@ -74,7 +75,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 .thenApply { torrentsDeleteFuture -> torrentsDeleteFuture ?: throw IllegalArgumentException("Infohash doesn't exist") }
                 .thenCompose {database.peersDelete(infohash) }
                 .thenApply { peersDeleteFuture -> peersDeleteFuture ?: throw IllegalArgumentException("Infohash doesn't exist") }
-                .thenCompose {database.statsDelete(infohash) }
+                .thenCompose {database.trackersStatsDelete(infohash) }
                 .thenApply { statsDeleteFuture -> statsDeleteFuture ?: throw IllegalArgumentException("Infohash doesn't exist") }
                 .thenApply { this.connectedPeers.remove(infohash) }
     }
@@ -176,7 +177,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         return database.announcesRead(infohash).thenApply { itList ->
             val torrentFile = TorrentFile(infohash, itList)//throws IllegalArgumentException
             torrentFile.scrapeTrackers(database)?.thenApply { torrentAllStats->
-                database.statsUpdate(infohash, torrentAllStats)
+                database.trackersStatsUpdate(infohash, torrentAllStats)
             }
             //update the current stats of the torrent file in the stats db
         }
@@ -239,7 +240,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @return A mapping from tracker announce URL to statistics.
      */
     fun trackerStats(infohash: String): CompletableFuture<Map<String, ScrapeData>> {
-        return database.statsRead(infohash).thenApply { dbStatsMap ->
+        return database.trackersStatsRead(infohash).thenApply { dbStatsMap ->
             val trackerStatsMap = hashMapOf<String, ScrapeData>()
             for ((trackerUrl, trackerValue) in dbStatsMap) {
                 val trackerMap = trackerValue as Map<String, Any>
@@ -272,35 +273,30 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         var downloaded:Long = 0
         var left:Long = 0
         var wasted:Long = 0
-        var shareRatio:Double = 0.0
         var pieces:Long = 0
         var havePieces:Long = 0
+        var shareRatio:Double = 0.0
         var leechTime:Duration = Duration.ZERO
         var seedTime:Duration = Duration.ZERO
-        return database.statsRead(infohash).thenApply { dbStatsMap ->
-            val trackerStatsMap = hashMapOf<String, ScrapeData>()
-            for ((trackerUrl, trackerValue) in dbStatsMap) {
-                val trackerMap = trackerValue as Map<String, Any>
-                if(trackerMap.containsKey("failure reason")) {
-                    trackerStatsMap[trackerUrl] = Failure(trackerMap["failure reason"] as String)
-                } else {
-                    trackerStatsMap[trackerUrl] = Scrape((trackerMap["complete"]as Long).toInt(),
-                        (trackerMap["downloaded"]as Long).toInt(),
-                        (trackerMap["incomplete"]as Long).toInt(),
-                        trackerMap["name"] as? String?)
+        return database.torrentsRead(infohash).thenApply { torrent ->
+            database.piecesStatsRead(infohash).thenApply { pieceMap ->
+                for ((index, pieceIndexStats) in pieceMap) {
+                    uploaded += pieceIndexStats.uploaded
+                    downloaded += pieceIndexStats.downloaded
+                    left += pieceIndexStats.left
+                    wasted += pieceIndexStats.wasted
+                    leechTime += pieceIndexStats.leechTime
+                    seedTime += pieceIndexStats.leechTime
                 }
-                uploaded += trackerMap?.get("uploaded") as? Long ?: 0
-                downloaded += trackerMap?.get("downloaded") as? Long ?: 0
-                left += trackerMap?.get("left") as? Long ?: 0
-                wasted += trackerMap?.get("wasted") as? Long ?: 0
-                shareRatio += trackerMap?.get("shareRatio") as? Long ?: 0
-                pieces += trackerMap?.get("pieces") as? Long ?: 0
-                havePieces += trackerMap?.get("havePieces") as? Long ?: 0
-                leechTime += trackerMap?.get("leechTime") as? Duration ?: Duration.ZERO
-                seedTime += trackerMap?.get("seedTime") as? Duration ?: Duration.ZERO
+                val havePieces: Long = pieceMap.size.toLong()
+                if (downloaded.toInt() == 0) {//haha it would be funny if there were no download time and it was zero
+                    shareRatio = uploaded.toDouble()
+                } else {
+                    shareRatio = uploaded.toDouble() / downloaded.toDouble()
+                }
             }
-
-            return@thenApply TorrentStats(uploaded,downloaded,left,wasted,shareRatio,pieces,havePieces,leechTime,seedTime)
+            havePieces = (torrent["pieces"] as String).toLong()/20 //pieces is a string build from 20 byte sha1(piece) * #pieces
+            return@thenApply TorrentStats(uploaded, downloaded, left, wasted, shareRatio, pieces, havePieces, leechTime, seedTime)
         }
     }
 
@@ -591,14 +587,14 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                             sha1hash(block) != pieces[pieceIndex.toInt()].toString()) throw PieceHashException("piece does not match the hash from the meta-info file")
 
                     //update the stats db
-                    database.statsRead(infohash).thenApply {torrentStats->
-                        val pieceStats : MutableMap<String,Int> = (torrentStats[pieces.substring(recievedPieceIndex,recievedPieceIndex +20 ) ] as Map<String,Int> ).toMutableMap()
-                        pieceStats["downloaded"] = (pieceStats["downloaded"] as Int ?: 0 ) + (block.size)
-                        pieceStats["left"] = (pieceStats["left"] as Int ?: (info?.get("pieces") as Int ?: 16000) ) - (block.size)
-                        //TODO: what other data should be save except the one above
+                    database.piecesStatsRead(infohash).thenApply { torrentStats->
+                        val pieceStats  = torrentStats[pieceIndex]!!
+                        pieceStats.downloaded = pieceStats.downloaded + (block.size)
+                        pieceStats.left = (pieceStats.left ?: (info?.get("pieces") as Long ?: 16000 ) ) - (block.size)
+                        //TODO: what other data should be save except the two rows above
                         pieceStats
                     }.thenApply { pieceStats ->
-                        database.statsUpdate(infohash, pieceStats as Map<String, Map<String, Any>>)
+                        database.piecesStatsUpdate(infohash, pieceStats as Map<Long, PieceIndexStats>)
                     }
                 }
                 catch (e: Exception) {

@@ -70,7 +70,7 @@ class TorrentFile(val infohash : String, immutableList : List<List<String>>) {
      * @returns the response string from the tracker, de-bencoded
      */
     fun announceTracker(params: List<Pair<String, String>>, database: SimpleDB) : CompletableFuture<Map<String, Any>> {
-        return database.statsRead(infohash).thenApply { statsRead ->
+        return database.trackersStatsRead(infohash).thenApply { statsRead ->
             val trackerStats = statsRead.toMutableMap()
             var lastErrorMessage = "Empty announce list"
             for(tier in this.announceList) {
@@ -106,13 +106,13 @@ class TorrentFile(val infohash : String, immutableList : List<List<String>>) {
                             newScrapeData["name"] = name
                         }
                         trackerStats[trackerURL] = newScrapeData
-                        database.statsUpdate(infohash, trackerStats)
+                        database.trackersStatsUpdate(infohash, trackerStats)
                         //return the response map
                         responseMap
                     }
                 }
             }
-            database.statsUpdate(infohash, trackerStats).apply {  }
+            database.trackersStatsUpdate(infohash, trackerStats).apply {  }
             throw TrackerException(lastErrorMessage)
 
         }
@@ -125,7 +125,7 @@ class TorrentFile(val infohash : String, immutableList : List<List<String>>) {
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
     fun scrapeTrackers(database: SimpleDB): CompletableFuture<MutableMap<String, Map<String, Any>>>? {
-        return database.statsRead(infohash).thenApply { statsRead->
+        return database.trackersStatsRead(infohash).thenApply { statsRead->
             val torrentAllStats = statsRead.toMutableMap()
             for (tier in announceList) {
                 for (trackerURL in tier) {
