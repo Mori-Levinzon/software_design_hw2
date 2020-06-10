@@ -380,28 +380,9 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 val decodedHandshake = receiveHandshake(s)
                 if(!decodedHandshake.infohash.contentEquals(infohashByteArray))
                     throw PeerConnectException("Infohashes do not agree")
-                //send bitfield message
-                //TODO If this torrent has anything downloaded, send a bitfield message.
-                //receive bitfield message
-                Thread.sleep(100) //TODO maybe withTimeout instead of waiting
-                //TODO Wait 100ms, and in that time handle any bitfield or have messages that are received.
-                //update known peers with peer id
-                val listKnownPeers = it.toMutableList()
-                listKnownPeers.remove(peer)
+
                 val newPeer = KnownPeer(peer.ip, peer.port, decodedHandshake.peerId.toString())
-                listKnownPeers.add(newPeer)
-                database.peersUpdate(infohash, listKnownPeers.map { kPeer ->
-                    if (kPeer.peerId == null)
-                        return@map mapOf("ip" to kPeer.ip, "port" to kPeer.port.toString())
-                    else
-                        return@map mapOf("ip" to kPeer.ip, "port" to kPeer.port.toString(), "peer id" to kPeer.peerId)
-                })
-                //update connectedPeers
-                if(this.connectedPeers.containsKey(infohash))
-                    this.connectedPeers[infohash]?.add(ConnectedPeerManager(
-                            ConnectedPeer(newPeer, true, false, true, false,
-                                    0.0, 0.0),
-                            s, listOf<Long>().toMutableList(), listOf<Long>().toMutableList()))
+                addNewPeer(infohash, s, it, newPeer, peer)
             }
             catch (e: Exception) {
                 e.printStackTrace()
@@ -410,6 +391,30 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
 
 
         }
+    }
+
+    private fun addNewPeer(infohash: String, s: Socket, kPeers : List<KnownPeer>, newPeer: KnownPeer, peerToRemove: KnownPeer?) {
+        //send bitfield message
+        //TODO If this torrent has anything downloaded, send a bitfield message.
+        //receive bitfield message
+        Thread.sleep(100) //TODO maybe withTimeout instead of waiting
+        //TODO Wait 100ms, and in that time handle any bitfield or have messages that are received.
+        //update known peers with peer id
+        val listKnownPeers = kPeers.toMutableList()
+        if (peerToRemove != null) listKnownPeers.remove(peerToRemove)
+        listKnownPeers.add(newPeer)
+        database.peersUpdate(infohash, listKnownPeers.map { kPeer ->
+            if (kPeer.peerId == null)
+                return@map kotlin.collections.mapOf("ip" to kPeer.ip, "port" to kPeer.port.toString())
+            else
+                return@map kotlin.collections.mapOf("ip" to kPeer.ip, "port" to kPeer.port.toString(), "peer id" to kPeer.peerId)
+        })
+        //update connectedPeers
+        if(this.connectedPeers.containsKey(infohash))
+            this.connectedPeers[infohash]?.add(ConnectedPeerManager(
+                    ConnectedPeer(newPeer, true, false, true, false,
+                            0.0, 0.0),
+                    s, listOf<Long>().toMutableList(), listOf<Long>().toMutableList()))
     }
 
     /**
@@ -521,11 +526,12 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 lst.forEach { peerManager -> peerManager.handleIncomingMessages() }
             }
             fun newPeerAcceptor() {
+                serverSocket?.soTimeout = 1;
                 val socket = serverSocket?.accept()
                 if(socket != null) {
                     val decodedHandshake = this.receiveHandshake(socket)
                     val newInfohash = byteArrayToInfohash(decodedHandshake.infohash)
-                    database.peersRead(newInfohash).exceptionally { exception ->
+                    this.knownPeers(newInfohash).exceptionally { exception ->
                         listOf()
                     }.thenApply { it ->
                         if (it.isEmpty()) { //torrent does not exist
@@ -533,12 +539,12 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                             throw PeerConnectException("No such infohash")
                         }
                         else { //torrent exists
-                            //TODO new peer
-                            val knownPeer = KnownPeer(socket.inetAddress.hostAddress, socket.port, decodedHandshake.peerId.toString())
-                        }
+                            val newPeer = KnownPeer(socket.inetAddress.hostAddress, socket.port,
+                                    decodedHandshake.peerId.toString())
+                            addNewPeer(newInfohash, socket, it, newPeer, null)
                     }
+                    newPeerAcceptor()
                 }
-                //TODO should we accept again?
             }
             CompletableFuture.supplyAsync({ newPeerAcceptor() })
             //send messages
