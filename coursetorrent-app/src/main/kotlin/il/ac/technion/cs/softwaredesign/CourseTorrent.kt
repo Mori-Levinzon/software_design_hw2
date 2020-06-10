@@ -537,13 +537,13 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                         if (it.isEmpty()) { //torrent does not exist
                             socket.close()
                             throw PeerConnectException("No such infohash")
-                        }
-                        else { //torrent exists
+                        } else { //torrent exists
                             val newPeer = KnownPeer(socket.inetAddress.hostAddress, socket.port,
                                     decodedHandshake.peerId.toString())
                             addNewPeer(newInfohash, socket, it, newPeer, null)
+                        }
+                        newPeerAcceptor()
                     }
-                    newPeerAcceptor()
                 }
             }
             CompletableFuture.supplyAsync({ newPeerAcceptor() })
@@ -563,6 +563,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             }
         }
     }
+
 
     /**
      * Download piece number [pieceIndex] of the torrent identified by [infohash].
