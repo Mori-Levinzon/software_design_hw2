@@ -39,7 +39,7 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     fun piecesStatsCreate(key: String, value: Map<Long, PieceIndexStats>) : Unit {
         piecesStatsStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray())}
     }
-    fun indexedPieceCreate(infohash: String, index: Long, value: Map<Long, ByteArray>) : Unit {//this one is rather Unnecessary since we can create a database each time we update a piece
+    fun indexedPieceCreate(infohash: String, index: Long, value: ByteArray) : Unit {//this one is rather Unnecessary since we can create a database each time we update a piece
         storage.open((infohash+index).toByteArray(charset)).thenCompose{ create(it, (infohash+index), Ben.encodeStr(value).toByteArray())}
     }
 
@@ -99,7 +99,7 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
                 }
     }
 
-    fun torrentsUpdate(key: String, value: List<List<String>>) : Unit {
+    fun torrentsUpdate(key: String, value: Map<String, Any>) : Unit {
         torrentsStorage.thenApply { update(it, key, Ben.encodeStr(value).toByteArray())}
     }
     fun announcesUpdate(key: String, value: List<List<String>>) : Unit {
@@ -117,7 +117,7 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
 
     fun indexedPieceUpdate(infohash: String, index: Long, value: ByteArray) : Unit {
         storage.open((infohash+index).toByteArray(charset))
-                .thenApply {update(it, (infohash+index.toString()), Ben.encodeStr(value).toByteArray())}
+                .thenApply {update(it, (infohash+index.toString()), value)}
     }
 
     fun torrentsDelete(key: String) : Unit {

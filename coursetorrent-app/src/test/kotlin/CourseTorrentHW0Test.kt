@@ -5,6 +5,7 @@ import com.google.inject.Guice
 import com.natpryce.hamkrest.*
 import com.natpryce.hamkrest.assertion.assertThat
 import dev.misfitlabs.kotlinguice4.getInstance
+import il.ac.technion.cs.softwaredesign.il.ac.technion.cs.softwaredesign.PieceIndexStats
 import io.github.vjames19.futures.jdk8.ImmediateFuture
 import io.mockk.every
 import io.mockk.mockk
@@ -24,20 +25,27 @@ class CourseTorrentHW0Test {
     private val ubuntu = this::class.java.getResource("/ubuntu-18.04.4-desktop-amd64.iso.torrent").readBytes()
     private var torrentsStorage = HashMap<String, ByteArray>()
     private var peersStorage = HashMap<String, ByteArray>()
-    private var statsStorage = HashMap<String, ByteArray>()
+    private var trackerStatsStorage = HashMap<String, ByteArray>()
+    private var announcesStorage = HashMap<String, ByteArray>()
+    private var piecesStatsStorage = HashMap<String, ByteArray>()
+    private var indexedPieceStorage = HashMap<String, ByteArray>()//TODO: not really like this
 
     @BeforeEach
     fun `initialize CourseTorrent with mocked DB`() {
         val memoryDB = mockk<SimpleDB>()
         var key = slot<String>()
-        var torrentsValue = slot<List<List<String>>>()
+        var indexedKey = slot<Long>()
+        var announcesValue = slot<List<List<String>>>()
         var peersValue = slot<List<Map<String, String>>>()
         var statsValue = slot<Map<String, Map<String, Any>>>()
+        var torrentsValue = slot<Map<String, Any>>()
+        var piecesStatsValue = slot<Map<Long, PieceIndexStats>>()
+        var indexPieceValue = slot<ByteArray>()
 
 
-        every { memoryDB.announcesCreate(capture(key), capture(torrentsValue)) } answers {
-            if(torrentsStorage.containsKey(key.captured)) throw IllegalStateException()
-            torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
+        every { memoryDB.announcesCreate(capture(key), capture(announcesValue)) } answers {
+            if(announcesStorage.containsKey(key.captured)) throw IllegalStateException()
+            announcesStorage[key.captured] = Ben.encodeStr(announcesValue.captured).toByteArray()
             ImmediateFuture{Unit}
         }
         every { memoryDB.peersCreate(capture(key), capture(peersValue)) } answers {
@@ -45,15 +53,36 @@ class CourseTorrentHW0Test {
             peersStorage[key.captured] = Ben.encodeStr(peersValue.captured).toByteArray()
             ImmediateFuture{Unit}
         }
+        every { memoryDB.torrentsCreate(capture(key), capture(torrentsValue)) } answers {
+            if(torrentsStorage.containsKey(key.captured)) throw IllegalStateException()
+            torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
+            ImmediateFuture{Unit}
+        }
         every { memoryDB.trackersStatsCreate(capture(key), capture(statsValue)) } answers {
-            if(statsStorage.containsKey(key.captured)) throw IllegalStateException()
-            statsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
+            if(trackerStatsStorage.containsKey(key.captured)) throw IllegalStateException()
+            trackerStatsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
+            ImmediateFuture{Unit}
+        }
+        every { memoryDB.piecesStatsCreate(capture(key), capture(piecesStatsValue)) } answers {
+            if(piecesStatsStorage.containsKey(key.captured)) throw IllegalStateException()
+            piecesStatsStorage[key.captured] = Ben.encodeStr(piecesStatsValue.captured).toByteArray()
+            ImmediateFuture{Unit}
+        }
+        every { memoryDB.indexedPieceCreate(capture(key), capture(indexedKey), capture(indexPieceValue)) } answers {
+            if(indexedPieceStorage.containsKey(key.captured+indexedKey.captured.toString())) throw IllegalStateException()
+            indexedPieceStorage[key.captured+indexedKey.captured.toString()] = Ben.encodeStr(piecesStatsValue.captured).toByteArray()
             ImmediateFuture{Unit}
         }
 
-        every { memoryDB.announcesUpdate(capture(key), capture(torrentsValue)) } answers {
+
+        every { memoryDB.torrentsUpdate(capture(key), capture(torrentsValue)) } answers {
             if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
+            ImmediateFuture{Unit}
+        }
+        every { memoryDB.announcesUpdate(capture(key), capture(announcesValue)) } answers {
+            if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
+            announcesStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
             ImmediateFuture{Unit}
         }
         every { memoryDB.peersUpdate(capture(key), capture(peersValue)) } answers {
@@ -62,27 +91,54 @@ class CourseTorrentHW0Test {
             ImmediateFuture{Unit}
         }
         every { memoryDB.trackersStatsUpdate(capture(key), capture(statsValue)) } answers {
-            if(!statsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-            statsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
+            if(!trackerStatsStorage.containsKey(key.captured)) throw IllegalArgumentException()
+            trackerStatsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
+            ImmediateFuture{Unit}
+        }
+        every { memoryDB.piecesStatsUpdate(capture(key), capture(piecesStatsValue)) } answers {
+            if(!piecesStatsStorage.containsKey(key.captured)) throw IllegalArgumentException()
+            piecesStatsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
+            ImmediateFuture{Unit}
+        }
+        every { memoryDB.indexedPieceUpdate(capture(key), capture(indexedKey), capture(indexPieceValue)) } answers {
+            if(!indexedPieceStorage.containsKey(key.captured+indexedKey.captured.toString())) throw IllegalArgumentException()
+            indexedPieceStorage[key.captured+indexedKey.captured.toString()] = Ben.encodeStr(statsValue.captured).toByteArray()
             ImmediateFuture{Unit}
         }
 
-        every { memoryDB.announcesRead(capture(key)) } answers {
+        every { memoryDB.torrentsRead(capture(key)) } answers {
             if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             Ben(torrentsStorage[key.captured] as ByteArray).decode() as? List<List<String>>? ?: throw IllegalArgumentException()
-            ImmediateFuture{Ben(torrentsStorage[key.captured] as ByteArray).decode() as List<List<String>>}
+            ImmediateFuture{Ben(torrentsStorage[key.captured] as ByteArray).decode() as Map<String, Any>}
+        }
+        every { memoryDB.announcesRead(capture(key)) } answers {
+            if(!announcesStorage.containsKey(key.captured)) throw IllegalArgumentException()
+            Ben(announcesStorage[key.captured] as ByteArray).decode() as? List<List<String>>? ?: throw IllegalArgumentException()
+            ImmediateFuture{Ben(announcesStorage[key.captured] as ByteArray).decode() as List<List<String>>}
         }
         every { memoryDB.peersRead(capture(key)) } answers {
             if(!peersStorage.containsKey(key.captured)) throw IllegalArgumentException()
             ImmediateFuture{Ben(peersStorage[key.captured] as ByteArray).decode() as? List<Map<String, String>> ?: throw IllegalArgumentException()}
         }
         every { memoryDB.trackersStatsRead(capture(key)) } answers {
-            if(!statsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-            ImmediateFuture{Ben(statsStorage[key.captured] as ByteArray).decode() as? Map<String, Map<String, Any>> ?: throw IllegalArgumentException()}
+            if(!trackerStatsStorage.containsKey(key.captured)) throw IllegalArgumentException()
+            ImmediateFuture{Ben(trackerStatsStorage[key.captured] as ByteArray).decode() as? Map<String, Map<String, Any>> ?: throw IllegalArgumentException()}
+        }
+        every { memoryDB.piecesStatsRead(capture(key)) } answers {
+            if(!piecesStatsStorage.containsKey(key.captured)) throw IllegalArgumentException()
+            ImmediateFuture{Ben(piecesStatsStorage[key.captured] as ByteArray).decode() as? Map<Long, PieceIndexStats> ?: throw IllegalArgumentException()}
+        }
+        every { memoryDB.indexedPieceRead(capture(key),capture(indexedKey)) } answers {
+            if(!indexedPieceStorage.containsKey(key.captured+indexedKey.captured.toString())) throw IllegalArgumentException()
+            ImmediateFuture{indexedPieceStorage[key.captured+indexedKey.captured.toString()]  ?: throw IllegalArgumentException()}
         }
 
-        every { memoryDB.announcesDelete(capture(key)) } answers {
+        every { memoryDB.torrentsDelete(capture(key)) } answers {
             torrentsStorage.remove(key.captured) ?: throw IllegalArgumentException()
+            ImmediateFuture{Unit}
+        }
+        every { memoryDB.announcesDelete(capture(key)) } answers {
+            announcesStorage.remove(key.captured) ?: throw IllegalArgumentException()
             ImmediateFuture{Unit}
         }
         every { memoryDB.peersDelete(capture(key)) } answers {
@@ -90,7 +146,19 @@ class CourseTorrentHW0Test {
             ImmediateFuture{Unit}
         }
         every { memoryDB.trackersStatsDelete(capture(key)) } answers {
-            statsStorage.remove(key.captured) ?: throw IllegalArgumentException()
+            trackerStatsStorage.remove(key.captured) ?: throw IllegalArgumentException()
+            ImmediateFuture{Unit}
+        }
+        every { memoryDB.piecesStatsDelete(capture(key)) } answers {
+            piecesStatsStorage.remove(key.captured) ?: throw IllegalArgumentException()
+            ImmediateFuture{Unit}
+        }
+        every { memoryDB.indexedPieceDelete(capture(key),capture(indexedKey)) } answers {
+            piecesStatsStorage.remove(key.captured+indexedKey.captured.toString()) ?: throw IllegalArgumentException()
+            ImmediateFuture{Unit}
+        }
+        every { memoryDB.indexedPieceDelete(capture(key),capture(indexedKey)) } answers {
+            piecesStatsStorage.clear()
             ImmediateFuture{Unit}
         }
         torrent = CourseTorrent(memoryDB)
