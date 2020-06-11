@@ -3,7 +3,6 @@
 package il.ac.technion.cs.softwaredesign
 
 import com.google.inject.Inject
-import com.sun.deploy.util.StringUtils
 import il.ac.technion.cs.softwaredesign.Utils.Companion.byteArrayToInfohash
 import il.ac.technion.cs.softwaredesign.Utils.Companion.sha1hash
 import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
@@ -160,8 +159,9 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     "compact" to "1",
                     "event" to event.asString
             )
-            torrentFile.announceTracker(params, database).thenApply { response ->
+            torrentFile.announceTracker(params, database).whenComplete { t, u ->
                 database.announcesUpdate(infohash, torrentFile.announceList)
+            }.thenApply { response ->
                 val peers: List<Map<String, String>> = getPeersFromResponse(response)
                 addToPeers(infohash, peers)
                 (response["interval"] as Long).toInt()
@@ -842,7 +842,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                         }
                         fileEntireByteArray = fileEntireByteArray.copyOfRange(0,fileLength.toInt())//if we add more zero bye array than we should
                         var filePath = Ben((fileMap["path"] as String).toByteArray()).decode() as List<String>
-                        val fileNameAndPath: String = "" + StringUtils.join(filePath,"/")//the path as required in the doc
+                        val fileNameAndPath: String = "" + filePath.joinToString("/") //the path as required in the doc
                         res[fileNameAndPath] = fileEntireByteArray
                     }
                     fileOffset += piecelength.toInt()
