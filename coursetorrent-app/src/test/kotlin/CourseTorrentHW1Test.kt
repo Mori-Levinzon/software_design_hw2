@@ -21,6 +21,8 @@ import org.junit.jupiter.api.assertThrows
 import java.lang.IllegalArgumentException
 import java.lang.IllegalStateException
 import java.time.Duration
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ExecutionException
 
 class CourseTorrentHW1Test {
     private val injector = Guice.createInjector(CourseTorrentModule())
@@ -54,22 +56,22 @@ class CourseTorrentHW1Test {
         every { memoryDB.announcesCreate(capture(key), capture(announcesValue)) } answers {
             if(announcesStorage.containsKey(key.captured)) throw IllegalStateException()
             announcesStorage[key.captured] = Ben.encodeStr(announcesValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.peersCreate(capture(key), capture(peersValue)) } answers {
             if(peersStorage.containsKey(key.captured)) throw IllegalStateException()
             peersStorage[key.captured] = Ben.encodeStr(peersValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.torrentsCreate(capture(key), capture(torrentsValue)) } answers {
             if(torrentsStorage.containsKey(key.captured)) throw IllegalStateException()
-            torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            torrentsStorage[key.captured] = Ben.encodeByteArray(torrentsValue.captured)
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.trackersStatsCreate(capture(key), capture(statsValue)) } answers {
             if(trackerStatsStorage.containsKey(key.captured)) throw IllegalStateException()
             trackerStatsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.piecesStatsCreate(capture(key), capture(piecesStatsValue)) } answers {
             if(piecesStatsStorage.containsKey(key.captured)) throw IllegalStateException()
@@ -79,44 +81,44 @@ class CourseTorrentHW1Test {
         every { memoryDB.indexedPieceCreate(capture(key), capture(indexedKey), capture(indexPieceValue)) } answers {
             if(indexedPieceStorage.containsKey(key.captured+indexedKey.captured.toString())) throw IllegalStateException()
             indexedPieceStorage[key.captured+indexedKey.captured.toString()] = Ben.encodeStr(piecesStatsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
 
 
         every { memoryDB.torrentsUpdate(capture(key), capture(torrentsValue)) } answers {
             if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-            torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            torrentsStorage[key.captured] = Ben.encodeByteArray(torrentsValue.captured)
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.announcesUpdate(capture(key), capture(announcesValue)) } answers {
-            if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-            announcesStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            if(!announcesStorage.containsKey(key.captured)) throw IllegalArgumentException()
+            announcesStorage[key.captured] = Ben.encodeStr(announcesValue.captured).toByteArray()
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.peersUpdate(capture(key), capture(peersValue)) } answers {
             if(!peersStorage.containsKey(key.captured)) throw IllegalArgumentException()
             peersStorage[key.captured] = Ben.encodeStr(peersValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.trackersStatsUpdate(capture(key), capture(statsValue)) } answers {
             if(!trackerStatsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             trackerStatsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.piecesStatsUpdate(capture(key), capture(piecesStatsValue)) } answers {
             if(!piecesStatsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             piecesStatsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.indexedPieceUpdate(capture(key), capture(indexedKey), capture(indexPieceValue)) } answers {
             if(!indexedPieceStorage.containsKey(key.captured+indexedKey.captured.toString())) throw IllegalArgumentException()
             indexedPieceStorage[key.captured+indexedKey.captured.toString()] = Ben.encodeStr(statsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
 
         every { memoryDB.torrentsRead(capture(key)) } answers {
             if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-            Ben(torrentsStorage[key.captured] as ByteArray).decode() as? List<List<String>>? ?: throw IllegalArgumentException()
+            Ben(torrentsStorage[key.captured] as ByteArray).decode() as? Map<String,Any>? ?: throw IllegalArgumentException()
             ImmediateFuture{Ben(torrentsStorage[key.captured] as ByteArray).decode() as Map<String, Any>}
         }
         every { memoryDB.announcesRead(capture(key)) } answers {
@@ -143,31 +145,31 @@ class CourseTorrentHW1Test {
 
         every { memoryDB.torrentsDelete(capture(key)) } answers {
             torrentsStorage.remove(key.captured) ?: throw IllegalArgumentException()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.announcesDelete(capture(key)) } answers {
             announcesStorage.remove(key.captured) ?: throw IllegalArgumentException()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.peersDelete(capture(key)) } answers {
             peersStorage.remove(key.captured) ?: throw IllegalArgumentException()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.trackersStatsDelete(capture(key)) } answers {
             trackerStatsStorage.remove(key.captured) ?: throw IllegalArgumentException()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.piecesStatsDelete(capture(key)) } answers {
             piecesStatsStorage.remove(key.captured) ?: throw IllegalArgumentException()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.indexedPieceDelete(capture(key),capture(indexedKey)) } answers {
             piecesStatsStorage.remove(key.captured+indexedKey.captured.toString()) ?: throw IllegalArgumentException()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.indexedPieceDelete(capture(key),capture(indexedKey)) } answers {
-            piecesStatsStorage.clear()
-            ImmediateFuture{Unit}
+            indexedPieceStorage.clear()
+            CompletableFuture.completedFuture(Unit)
         }
         torrent = CourseTorrent(memoryDB)
         unmockkObject(Fuel)
@@ -215,16 +217,19 @@ class CourseTorrentHW1Test {
     fun `announce call returns an exception for negative values for request params`() {
         val infohash = torrent.load(debian).get()
         mockHttp(mapOf("failure reason" to "Negative parameters"))
-        assertThrows<TrackerException> {
+//        assertThrows<TrackerException> {
+        assertThrows<ExecutionException> {
             runWithTimeout(Duration.ofSeconds(10)){
                 torrent.announce(infohash, TorrentEvent.STARTED, -1, 0, 0).get() }
         }
-        assertThrows<TrackerException> {
+//        assertThrows<TrackerException> {
+        assertThrows<ExecutionException> {
             runWithTimeout(Duration.ofSeconds(10)){
                 torrent.announce(infohash, TorrentEvent.STARTED, -1, -1, 0).get()
             }
         }
-        assertThrows<TrackerException> {
+//        assertThrows<TrackerException> {
+        assertThrows<ExecutionException> {
             runWithTimeout(Duration.ofSeconds(10)){
                 torrent.announce(infohash, TorrentEvent.STARTED, -1, 0, -1).get()
             }
@@ -234,7 +239,8 @@ class CourseTorrentHW1Test {
     @Test
     fun `failed announce call still updates the stats DB`() {
         val infohash = torrent.load(lame).get() //this torrent has a bad tracker
-        assertThrows<TrackerException> {
+//        assertThrows<TrackerException> {
+        assertThrows<ExecutionException> {
             runWithTimeout(Duration.ofSeconds(10)){
                 torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 0).get()
             }
@@ -251,11 +257,13 @@ class CourseTorrentHW1Test {
         val infohash = torrent.load(lame_big_list).get()
         val annouceListBefore = torrent.announces(infohash).join()
 
-        assertThrows<TrackerException> {
+//        assertThrows<TrackerException> {
+        assertThrows<ExecutionException> {
             torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 0).get()
         }
 
         val annouceListAfter = torrent.announces(infohash).join()
+
         assertThat(annouceListBefore, equalTo(annouceListAfter).not())
         /* Assertion to verify the the announce list was shuffled */
     }
@@ -310,7 +318,8 @@ class CourseTorrentHW1Test {
 
         mockHttp(mapOf("failure reason" to "invalid parameters"))
 
-        assertThrows<TrackerException> { torrent.announce(infohash, TorrentEvent.STARTED, -1, 0, 0).get() }
+//        assertThrows<TrackerException> { torrent.announce(infohash, TorrentEvent.STARTED, -1, 0, 0).get() }
+        assertThrows<ExecutionException> { torrent.announce(infohash, TorrentEvent.STARTED, -1, 0, 0).get() }
 
 
         assert(
@@ -327,9 +336,9 @@ class CourseTorrentHW1Test {
         val infohash = torrent.load(lame).get()
 
         /* Returned peer list is: [("127.0.0.22", 6887)] */
-        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360)
+        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360).join()
         /* Returned peer list is: [("127.0.0.22", 6887), ("127.0.0.21", 6889)] */
-        torrent.announce(infohash, TorrentEvent.REGULAR, 0, 81920, 2621440)
+        torrent.announce(infohash, TorrentEvent.REGULAR, 0, 81920, 2621440).join()
 
         runWithTimeout(Duration.ofSeconds(10)) {
             assertThat(
@@ -520,7 +529,7 @@ class CourseTorrentHW1Test {
 
     @Test
     fun `trackerStats call throws exception for wrong infohash`() {
-        assertThrows<java.lang.IllegalArgumentException> { torrent.trackerStats("wrong infohash").get() }
+        assertThrows<java.lang.IllegalArgumentException> { torrent.trackerStats("wrong infohash").join() }
     }
 
     @Test

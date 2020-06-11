@@ -54,9 +54,10 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 database.peersCreate(infohash, listOf())
                 database.trackersStatsCreate(infohash, mapOf())
                 database.piecesStatsCreate(infohash, mapOf())
-                database.torrentsCreate(infohash, torrentData as Map<String, Any>)
-            }catch (e: Exception) {
-                throw IllegalArgumentException("Infohash doesn't exist")
+                database.torrentsCreate(infohash, Ben(torrent).decode() as Map<String, Any>)
+            }catch (e: IllegalStateException) {
+                e.printStackTrace()
+                throw IllegalStateException("Same infohash already loaded")
             }
             infohash
         }
@@ -79,7 +80,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 database.piecesStatsDelete(infohash)
 //                database.allpiecesDelete(infohash)//TODO: create a read for the number of pieces that thier DB need to be destroyed
                 database.torrentsDelete(infohash)
-            }catch (e: Exception) {
+            }catch (e: IllegalArgumentException) {
                 throw IllegalArgumentException("Infohash doesn't exist")
             }
 
@@ -145,27 +146,26 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         left: Long
     ): CompletableFuture<Int> {
         return database.announcesRead(infohash).thenApply { itList ->
-            var torrentFile = TorrentFile(infohash, itList)//throws IllegalArgumentException
+            val torrentFile = TorrentFile(infohash, itList)//throws IllegalArgumentException
             if (event == TorrentEvent.STARTED) torrentFile.shuffleAnnounceList()
+            torrentFile
+        }.thenCompose {torrentFile ->
             val params = listOf(
-                "info_hash" to Utils.urlEncode(infohash),
-                "peer_id" to this.getPeerID(),
-                "port" to "6881", //Matan said to leave it like that, will be changed in future assignments
-                "uploaded" to uploaded.toString(),
-                "downloaded" to downloaded.toString(),
-                "left" to left.toString(),
-                "compact" to "1",
-                "event" to event.asString
+                    "info_hash" to Utils.urlEncode(infohash),
+                    "peer_id" to this.getPeerID(),
+                    "port" to "6881", //Matan said to leave it like that, will be changed in future assignments
+                    "uploaded" to uploaded.toString(),
+                    "downloaded" to downloaded.toString(),
+                    "left" to left.toString(),
+                    "compact" to "1",
+                    "event" to event.asString
             )
-
             torrentFile.announceTracker(params, database).thenApply { response ->
                 database.announcesUpdate(infohash, torrentFile.announceList)
                 val peers: List<Map<String, String>> = getPeersFromResponse(response)
                 addToPeers(infohash, peers)
-                response
-            }.thenApply { response ->
                 (response["interval"] as Long).toInt()
-            }.get()
+            }
         }
     }
 

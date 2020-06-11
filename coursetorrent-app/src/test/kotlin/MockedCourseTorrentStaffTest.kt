@@ -20,6 +20,8 @@ import io.github.vjames19.futures.jdk8.ImmediateFuture
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertDoesNotThrow
 import org.junit.jupiter.api.assertThrows
+import java.net.Socket
+import java.util.concurrent.CompletableFuture
 
 class MockedCourseTorrentStaffTest {
     private val injector = Guice.createInjector(CourseTorrentModule())
@@ -51,22 +53,22 @@ class MockedCourseTorrentStaffTest {
         every { memoryDB.announcesCreate(capture(key), capture(announcesValue)) } answers {
             if(announcesStorage.containsKey(key.captured)) throw IllegalStateException()
             announcesStorage[key.captured] = Ben.encodeStr(announcesValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.peersCreate(capture(key), capture(peersValue)) } answers {
             if(peersStorage.containsKey(key.captured)) throw IllegalStateException()
             peersStorage[key.captured] = Ben.encodeStr(peersValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.torrentsCreate(capture(key), capture(torrentsValue)) } answers {
             if(torrentsStorage.containsKey(key.captured)) throw IllegalStateException()
-            torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            torrentsStorage[key.captured] = Ben.encodeByteArray(torrentsValue.captured)
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.trackersStatsCreate(capture(key), capture(statsValue)) } answers {
             if(trackerStatsStorage.containsKey(key.captured)) throw IllegalStateException()
             trackerStatsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.piecesStatsCreate(capture(key), capture(piecesStatsValue)) } answers {
             if(piecesStatsStorage.containsKey(key.captured)) throw IllegalStateException()
@@ -76,44 +78,44 @@ class MockedCourseTorrentStaffTest {
         every { memoryDB.indexedPieceCreate(capture(key), capture(indexedKey), capture(indexPieceValue)) } answers {
             if(indexedPieceStorage.containsKey(key.captured+indexedKey.captured.toString())) throw IllegalStateException()
             indexedPieceStorage[key.captured+indexedKey.captured.toString()] = Ben.encodeStr(piecesStatsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
 
 
         every { memoryDB.torrentsUpdate(capture(key), capture(torrentsValue)) } answers {
             if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-            torrentsStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            torrentsStorage[key.captured] = Ben.encodeByteArray(torrentsValue.captured)
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.announcesUpdate(capture(key), capture(announcesValue)) } answers {
-            if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-            announcesStorage[key.captured] = Ben.encodeStr(torrentsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            if(!announcesStorage.containsKey(key.captured)) throw IllegalArgumentException()
+            announcesStorage[key.captured] = Ben.encodeStr(announcesValue.captured).toByteArray()
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.peersUpdate(capture(key), capture(peersValue)) } answers {
             if(!peersStorage.containsKey(key.captured)) throw IllegalArgumentException()
             peersStorage[key.captured] = Ben.encodeStr(peersValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.trackersStatsUpdate(capture(key), capture(statsValue)) } answers {
             if(!trackerStatsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             trackerStatsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.piecesStatsUpdate(capture(key), capture(piecesStatsValue)) } answers {
             if(!piecesStatsStorage.containsKey(key.captured)) throw IllegalArgumentException()
             piecesStatsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.indexedPieceUpdate(capture(key), capture(indexedKey), capture(indexPieceValue)) } answers {
             if(!indexedPieceStorage.containsKey(key.captured+indexedKey.captured.toString())) throw IllegalArgumentException()
             indexedPieceStorage[key.captured+indexedKey.captured.toString()] = Ben.encodeStr(statsValue.captured).toByteArray()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
 
         every { memoryDB.torrentsRead(capture(key)) } answers {
             if(!torrentsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-            Ben(torrentsStorage[key.captured] as ByteArray).decode() as? List<List<String>>? ?: throw IllegalArgumentException()
+            Ben(torrentsStorage[key.captured] as ByteArray).decode() as? Map<String,Any>? ?: throw IllegalArgumentException()
             ImmediateFuture{Ben(torrentsStorage[key.captured] as ByteArray).decode() as Map<String, Any>}
         }
         every { memoryDB.announcesRead(capture(key)) } answers {
@@ -140,31 +142,31 @@ class MockedCourseTorrentStaffTest {
 
         every { memoryDB.torrentsDelete(capture(key)) } answers {
             torrentsStorage.remove(key.captured) ?: throw IllegalArgumentException()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.announcesDelete(capture(key)) } answers {
             announcesStorage.remove(key.captured) ?: throw IllegalArgumentException()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.peersDelete(capture(key)) } answers {
             peersStorage.remove(key.captured) ?: throw IllegalArgumentException()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.trackersStatsDelete(capture(key)) } answers {
             trackerStatsStorage.remove(key.captured) ?: throw IllegalArgumentException()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.piecesStatsDelete(capture(key)) } answers {
             piecesStatsStorage.remove(key.captured) ?: throw IllegalArgumentException()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.indexedPieceDelete(capture(key),capture(indexedKey)) } answers {
             piecesStatsStorage.remove(key.captured+indexedKey.captured.toString()) ?: throw IllegalArgumentException()
-            ImmediateFuture{Unit}
+            CompletableFuture.completedFuture(Unit)
         }
         every { memoryDB.indexedPieceDelete(capture(key),capture(indexedKey)) } answers {
-            piecesStatsStorage.clear()
-            ImmediateFuture{Unit}
+            indexedPieceStorage.clear()
+            CompletableFuture.completedFuture(Unit)
         }
         torrent = CourseTorrent(memoryDB)
         unmockkObject(Fuel)
@@ -198,13 +200,13 @@ class MockedCourseTorrentStaffTest {
     }
 
     @Test
-    fun `client announces to tracker`() {
-        val infohash = torrent.load(lame).get()
+    fun `client announces to tracker debian`() {
+        val infohash = torrent.load(debian).get()
 
         /* interval is 360 */
         val interval = torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 0).get()
 
-        assertThat(interval, equalTo(360))
+        assertThat(interval, equalTo(900))
         /* Assertion to verify that the tracker was actually called */
     }
 
@@ -216,36 +218,42 @@ class MockedCourseTorrentStaffTest {
         assertDoesNotThrow { torrent.scrape(infohash).join() }
 
         assertThat(
-            torrent.trackerStats(infohash).get(),
-            equalTo(mapOf(Pair("https://127.0.0.1:8082/announce", Scrape(0, 0, 0, null) as ScrapeData)))
+                torrent.trackerStats(infohash).get(),
+                equalTo(mapOf(Pair("https://127.0.0.1:8082/announce", Scrape(0, 0, 0, null) as ScrapeData)))
         )
         /* Assertion to verify that the tracker was actually called */
     }
 
     @Test
     fun `after announce, client has up-to-date peer list`() {
+        mockHttp(mapOf("interval" to 360, "complete" to 0, "incomplete" to 0, "tracker id" to "1234",
+                "peers" to ubyteArrayOf(127u, 0u, 0u, 22u, 26u, 231u, 127u, 0u, 0u, 21u, 26u, 233u).toByteArray()))
+
         val infohash = torrent.load(lame).get()
 
         /* Returned peer list is: [("127.0.0.22", 6887)] */
-        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360)
+        torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360).join()
         /* Returned peer list is: [("127.0.0.22", 6887), ("127.0.0.21", 6889)] */
-        torrent.announce(infohash, TorrentEvent.REGULAR, 0, 81920, 2621440)
+        torrent.announce(infohash, TorrentEvent.REGULAR, 0, 81920, 2621440).join()
 
         val knownPeers = torrent.knownPeers(infohash).join()
 
         assertThat(
-            knownPeers,
-            anyElement(has(KnownPeer::ip, equalTo("127.0.0.22")) and has(KnownPeer::port, equalTo(6887)))
+                knownPeers,
+                anyElement(has(KnownPeer::ip, equalTo("127.0.0.22")) and has(KnownPeer::port, equalTo(6887)))
         )
         assertThat(
-            knownPeers,
-            anyElement(has(KnownPeer::ip, equalTo("127.0.0.21")) and has(KnownPeer::port, equalTo(6889)))
+                knownPeers,
+                anyElement(has(KnownPeer::ip, equalTo("127.0.0.21")) and has(KnownPeer::port, equalTo(6889)))
         )
         assertThat(knownPeers, equalTo(knownPeers.distinct()))
     }
 
     @Test
     fun `peers are invalidated correctly`() {
+        mockHttp(mapOf("interval" to 360, "complete" to 0, "incomplete" to 0, "tracker id" to "1234",
+                "peers" to ubyteArrayOf(127u, 0u, 0u, 22u, 26u, 231u, 127u, 0u, 0u, 21u, 26u, 233u).toByteArray()))
+
         val infohash = torrent.load(lame).get()
         /* Returned peer list is: [("127.0.0.22", 6887)] */
         torrent.announce(infohash, TorrentEvent.STARTED, 0, 0, 2703360).get()
@@ -257,8 +265,8 @@ class MockedCourseTorrentStaffTest {
         val knownPeers = torrent.knownPeers(infohash).get()
 
         assertThat(
-            knownPeers,
-            anyElement(has(KnownPeer::ip, equalTo("127.0.0.22")) and has(KnownPeer::port, equalTo(6887))).not()
+                knownPeers,
+                anyElement(has(KnownPeer::ip, equalTo("127.0.0.22")) and has(KnownPeer::port, equalTo(6887))).not()
         )
     }
 
@@ -276,10 +284,10 @@ class MockedCourseTorrentStaffTest {
         val infohash = torrent.load(lame).get()
 
         val done = torrent.loadFiles(
-            infohash,
-            mapOf("lame.exe" to lameExe.readBytes(), "lame_enc.dll" to lameEnc.readBytes())
+                infohash,
+                mapOf("lame.exe" to lameExe.readBytes(), "lame_enc.dll" to lameEnc.readBytes())
         )
-            .thenCompose { torrent.recheck(infohash) }.get()
+                .thenCompose { torrent.recheck(infohash) }.get()
 
         Assertions.assertTrue(done)
     }
@@ -289,10 +297,10 @@ class MockedCourseTorrentStaffTest {
         val infohash = torrent.load(lame).get()
 
         val done = torrent.loadFiles(
-            infohash,
-            mapOf("lame.exe" to "wrong data".toByteArray(), "lame_enc.dll" to "wrongest data".toByteArray())
+                infohash,
+                mapOf("lame.exe" to "wrong data".toByteArray(), "lame_enc.dll" to "wrongest data".toByteArray())
         )
-            .thenCompose { torrent.recheck(infohash) }.get()
+                .thenCompose { torrent.recheck(infohash) }.get()
 
         Assertions.assertFalse(done)
     }
@@ -321,7 +329,7 @@ class MockedCourseTorrentStaffTest {
 //        torrent.stop().get()
 //        sock.close()
 //    }
-//
+
 //    @Test
 //    fun `sends choke command to peer`() {
 //        val infohash = torrent.load(lame).get()
@@ -329,7 +337,7 @@ class MockedCourseTorrentStaffTest {
 //
 //        torrent.connectedPeers(infohash).thenApply {
 //            it.asSequence().map(ConnectedPeer::knownPeer).first() }
-//            .thenAccept { torrent.choke(infohash, it) }
+//                .thenAccept { torrent.choke(infohash, it) }
 //
 //        val message = StaffWireProtocolDecoder.decode(sock.inputStream.readNBytes(5), 0)
 //
@@ -338,7 +346,7 @@ class MockedCourseTorrentStaffTest {
 //        torrent.stop().get()
 //        sock.close()
 //    }
-//
+
 //    @Test
 //    fun `sends unchoke command to peer`() {
 //        val infohash = torrent.load(lame).get()
@@ -346,7 +354,7 @@ class MockedCourseTorrentStaffTest {
 //
 //        torrent.connectedPeers(infohash).thenApply {
 //            it.asSequence().map(ConnectedPeer::knownPeer).first() }
-//            .thenAccept { torrent.unchoke(infohash, it) }
+//                .thenAccept { torrent.unchoke(infohash, it) }
 //
 //        val message = StaffWireProtocolDecoder.decode(sock.inputStream.readNBytes(5), 0)
 //
@@ -355,7 +363,7 @@ class MockedCourseTorrentStaffTest {
 //        torrent.stop().get()
 //        sock.close()
 //    }
-//
+
 //    @Test
 //    fun `after receiving have message, a piece is marked as available`() {
 //        val infohash = torrent.load(lame).get()
@@ -374,7 +382,7 @@ class MockedCourseTorrentStaffTest {
 //        torrent.stop().get()
 //        sock.close()
 //    }
-//
+
 //    @Test
 //    fun `sends interested message to peer after receiving a have message`() {
 //        val infohash = torrent.load(lame).get()
@@ -391,15 +399,15 @@ class MockedCourseTorrentStaffTest {
 //        torrent.stop().get()
 //        sock.close()
 //    }
-//
+
 //    private fun initiateRemotePeer(infohash: String): Socket {
 //        torrent.torrentStats(infohash).thenCompose {
 //            torrent.announce(
-//                infohash,
-//                TorrentEvent.STARTED,
-//                uploaded = it.uploaded,
-//                downloaded = it.downloaded,
-//                left = it.left
+//                    infohash,
+//                    TorrentEvent.STARTED,
+//                    uploaded = it.uploaded,
+//                    downloaded = it.downloaded,
+//                    left = it.left
 //            )
 //        }.join()
 //
@@ -409,10 +417,10 @@ class MockedCourseTorrentStaffTest {
 //
 //        val sock = assertDoesNotThrow { Socket("127.0.0.1", port) }
 //        sock.outputStream.write(
-//            WireProtocolEncoder.handshake(
-//                hexStringToByteArray(infohash),
-//                hexStringToByteArray(infohash.reversed())
-//            )
+//                WireProtocolEncoder.handshake(
+//                        hexStringToByteArray(infohash),
+//                        hexStringToByteArray(infohash.reversed())
+//                )
 //        )
 //
 //        assertDoesNotThrow { torrent.handleSmallMessages().join() }

@@ -70,9 +70,10 @@ class TorrentFile(val infohash : String, immutableList : List<List<String>>) {
      * @returns the response string from the tracker, de-bencoded
      */
     fun announceTracker(params: List<Pair<String, String>>, database: SimpleDB) : CompletableFuture<Map<String, Any>> {
+        var res : Map<String, Any>? = null
+        var lastErrorMessage = "Empty announce list"
         return database.trackersStatsRead(infohash).thenApply { statsRead ->
             val trackerStats = statsRead.toMutableMap()
-            var lastErrorMessage = "Empty announce list"
             for(tier in this.announceList) {
                 for(trackerURL in tier) {
                     val (_, _, result) = trackerURL.withParams(params).httpGet().response()
@@ -106,17 +107,20 @@ class TorrentFile(val infohash : String, immutableList : List<List<String>>) {
                             newScrapeData["name"] = name
                         }
                         trackerStats[trackerURL] = newScrapeData
-                        database.trackersStatsUpdate(infohash, trackerStats)
+//                        database.trackersStatsUpdate(infohash, trackerStats)
                         //return the response map
-                        responseMap
+                        res = responseMap
                     }
                 }
             }
-            database.trackersStatsUpdate(infohash, trackerStats).apply {  }
-            throw TrackerException(lastErrorMessage)
-
+            database.trackersStatsUpdate(infohash, trackerStats)
+//            throw TrackerException(lastErrorMessage)
+            if (res ==null){
+                throw TrackerException(lastErrorMessage)
+            }else{
+                res
+            }
         }
-
     }
 
     /**
