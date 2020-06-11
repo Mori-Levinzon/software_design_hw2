@@ -1,6 +1,7 @@
 package il.ac.technion.cs.softwaredesign
 
 import com.google.j2objc.annotations.WeakOuter
+import il.ac.technion.cs.softwaredesign.il.ac.technion.cs.softwaredesign.PieceIndexStats
 import java.net.Socket
 import java.util.*
 
@@ -22,7 +23,7 @@ class ConnectedPeerManager(
      * is choked.
      */
     fun handleIncomingMessages() : Unit {
-        val message = socket.getInputStream().readAllBytes()
+        val message = socket.getInputStream().readBytes()
         if (WireProtocolDecoder.length(message) == 0) return
         val messageId = WireProtocolDecoder.messageId(message)
         when(messageId) {
@@ -50,7 +51,7 @@ class ConnectedPeerManager(
         socket.getOutputStream().write(byteArrayOf(0.toByte()))
     }
 
-    fun decideIfInterested(piecesWeHaveMap : Map<Long, ByteArray>) : Unit {
+    fun decideIfInterested(piecesWeHaveMap : Map<Long, PieceIndexStats>) : Unit {
         val hasPieceThatWeWant = availablePieces.filter { index -> !piecesWeHaveMap.containsKey(index) }.isNotEmpty()
         if (connectedPeer.amInterested && !hasPieceThatWeWant) {
             //change to not interested
