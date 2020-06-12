@@ -12,6 +12,7 @@ import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
 import java.lang.Thread.sleep
 import java.net.ServerSocket
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
@@ -404,7 +405,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         //send bitfield message
         //TODO If this torrent has anything downloaded, send a bitfield message.
         //receive bitfield message
-        Thread.sleep(100) //TODO maybe withTimeout instead of waiting
+        //Thread.sleep(100) //TODO maybe withTimeout instead of waiting
         //TODO Wait 100ms, and in that time handle any bitfield or have messages that are received.
         //update known peers with peer id
         val listKnownPeers = kPeers.toMutableList()
@@ -417,11 +418,13 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 return@map kotlin.collections.mapOf("ip" to kPeer.ip, "port" to kPeer.port.toString(), "peer id" to kPeer.peerId)
         })
         //update connectedPeers
-        if(this.connectedPeers.containsKey(infohash))
-            this.connectedPeers[infohash]?.add(ConnectedPeerManager(
-                    ConnectedPeer(newPeer, true, false, true, false,
-                            0.0, 0.0),
-                    s, listOf<Long>().toMutableList(), listOf<Long>().toMutableList()))
+        if(!this.connectedPeers.containsKey(infohash))
+            this.connectedPeers[infohash] = mutableListOf()
+
+        this.connectedPeers[infohash]?.add(ConnectedPeerManager(
+                ConnectedPeer(newPeer, true, false, true, false,
+                        0.0, 0.0),
+                s, listOf<Long>().toMutableList(), listOf<Long>().toMutableList()))
     }
 
     /**
@@ -529,12 +532,13 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
     fun handleSmallMessages(): CompletableFuture<Unit> {
         return CompletableFuture.supplyAsync {
             //receive messages
-            connectedPeers.forEach { infohash, lst ->
-                lst.forEach { peerManager -> peerManager.handleIncomingMessages() }
-            }
             fun newPeerAcceptor() {
                 serverSocket?.soTimeout = 1;
-                val socket = serverSocket?.accept()
+                val socket = try {
+                    serverSocket?.accept()
+                } catch(ex : SocketTimeoutException) {
+                    null
+                }
                 if(socket != null) {
                     val decodedHandshake = this.receiveHandshake(socket)
                     val newInfohash = byteArrayToInfohash(decodedHandshake.infohash)
@@ -555,7 +559,10 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     }
                 }
             }
-            CompletableFuture.supplyAsync({ newPeerAcceptor() })
+            newPeerAcceptor()
+            connectedPeers.forEach { infohash, lst ->
+                lst.forEach { peerManager -> peerManager.handleIncomingMessages() }
+            }
             //send messages
             val now = System.currentTimeMillis()
             val timeElapsed = now - lastTimeKeptAlive
@@ -566,11 +573,6 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 lastTimeKeptAlive = now
             }
             connectedPeers.forEach { infohash, lst ->
-                //older code
-//                database.piecesRead(infohash).thenApply { piecesWeHaveMap ->
-//                    lst.forEach { peerManager -> peerManager.decideIfInterested(piecesWeHaveMap) }
-//                }
-                //new code with less heavy data accesses to the memory
                 database.piecesStatsRead(infohash).thenApply { piecesStatsWeHaveMap ->
                     val piecesWeHaveThatNotDamaged = piecesStatsWeHaveMap.filter { it -> it.value.isValid == true }
                     lst.forEach { peerManager -> peerManager.decideIfInterested(piecesWeHaveThatNotDamaged) }

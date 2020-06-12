@@ -387,90 +387,92 @@ class MockedCourseTorrentStaffTest {
         sock.close()
     }
 
-//    @Test
-//    fun `lists remotely connected peer in known and connected peers`() {
-//        val infohash = torrent.load(lame).get()
-//
-//        val sock = initiateRemotePeer(infohash)
-//
-//        val knownPeers = torrent.knownPeers(infohash).get()
-//        val connectedPeers = torrent.connectedPeers(infohash).get()
-//
-//        assertThat(connectedPeers.size, equalTo(1))
-//
-//        torrent.stop().get()
-//        sock.close()
-//    }
+    @Test
+    fun `lists remotely connected peer in known and connected peers`() {
+        val infohash = torrent.load(lame).get()
 
-//    @Test
-//    fun `sends choke command to peer`() {
-//        val infohash = torrent.load(lame).get()
-//        val sock = initiateRemotePeer(infohash)
-//
-//        torrent.connectedPeers(infohash).thenApply {
-//            it.asSequence().map(ConnectedPeer::knownPeer).first() }
-//                .thenAccept { torrent.choke(infohash, it) }
-//
-//        val message = StaffWireProtocolDecoder.decode(sock.inputStream.readNBytes(5), 0)
-//
-//        assertThat(message.messageId, equalTo(0.toByte()))
-//
-//        torrent.stop().get()
-//        sock.close()
-//    }
+        val sock = initiateRemotePeer(infohash)
 
-//    @Test
-//    fun `sends unchoke command to peer`() {
-//        val infohash = torrent.load(lame).get()
-//        val sock = initiateRemotePeer(infohash)
-//
-//        torrent.connectedPeers(infohash).thenApply {
-//            it.asSequence().map(ConnectedPeer::knownPeer).first() }
-//                .thenAccept { torrent.unchoke(infohash, it) }
-//
-//        val message = StaffWireProtocolDecoder.decode(sock.inputStream.readNBytes(5), 0)
-//
-//        assertThat(message.messageId, equalTo(1.toByte()))
-//
-//        torrent.stop().get()
-//        sock.close()
-//    }
+        val knownPeers = torrent.knownPeers(infohash).get()
+        val connectedPeers = torrent.connectedPeers(infohash).get()
 
-//    @Test
-//    fun `after receiving have message, a piece is marked as available`() {
-//        val infohash = torrent.load(lame).get()
-//        val sock = initiateRemotePeer(infohash)
-//        sock.outputStream.write(StaffWireProtocolEncoder.encode(4, 0))
-//        sock.outputStream.flush()
-//
-//        val pieces = assertDoesNotThrow {
-//            torrent.handleSmallMessages().get()
-//            torrent.availablePieces(infohash, 10, 0).get()
-//        }
-//
-//        assertThat(pieces.keys, hasSize(equalTo(1)))
-//        assertThat(pieces.values.first(), hasElement(0L))
-//
-//        torrent.stop().get()
-//        sock.close()
-//    }
+        assertThat(connectedPeers.size, equalTo(1))
 
-//    @Test
-//    fun `sends interested message to peer after receiving a have message`() {
-//        val infohash = torrent.load(lame).get()
-//        val sock = initiateRemotePeer(infohash)
-//        sock.outputStream.write(StaffWireProtocolEncoder.encode(4, 0))
-//        sock.outputStream.flush()
-//
-//        assertDoesNotThrow { torrent.handleSmallMessages().get() }
-//
-//        val message = StaffWireProtocolDecoder.decode(sock.inputStream.readNBytes(5), 0)
-//
-//        assertThat(message.messageId, equalTo(2.toByte()))
-//
-//        torrent.stop().get()
-//        sock.close()
-//    }
+        torrent.stop().get()
+        sock.close()
+    }
+
+    @Test
+    fun `sends choke command to peer`() {
+        val infohash = torrent.load(lame).get()
+        val sock = initiateRemotePeer(infohash)
+
+        torrent.connectedPeers(infohash).thenApply {
+            it.asSequence().map(ConnectedPeer::knownPeer).first() }
+                .thenAccept { torrent.choke(infohash, it) }
+
+        val message = WireProtocolDecoder.decode(sock.inputStream.readNBytes(5), 0)
+
+        assertThat(message.messageId, equalTo(0.toByte()))
+
+        torrent.stop().get()
+        sock.close()
+    }
+
+    @Test
+    fun `sends unchoke command to peer`() {
+        val infohash = torrent.load(lame).get()
+        val sock = initiateRemotePeer(infohash)
+
+        torrent.connectedPeers(infohash).thenApply {
+            it.asSequence().map(ConnectedPeer::knownPeer).first() }
+                .thenAccept { torrent.unchoke(infohash, it) }
+
+        val message = WireProtocolDecoder.decode(sock.inputStream.readNBytes(5), 0)
+
+        assertThat(message.messageId, equalTo(1.toByte()))
+
+        torrent.stop().get()
+        sock.close()
+    }
+
+    @Test
+    fun `after receiving have message, a piece is marked as available`() {
+        val infohash = torrent.load(lame).get()
+        val sock = initiateRemotePeer(infohash)
+        sock.outputStream.write(WireProtocolEncoder.encode(4, 0))
+        sock.outputStream.write(WireProtocolEncoder.encode(1)) // FIX: Need to unchoke.
+        sock.outputStream.flush()
+
+        val pieces = assertDoesNotThrow {
+            torrent.handleSmallMessages().get()
+            torrent.availablePieces(infohash, 10, 0).get()
+        }
+
+
+        assertThat(pieces.keys, hasSize(equalTo(1)))
+        assertThat(pieces.values.first(), hasElement(0L))
+
+        torrent.stop().get()
+        sock.close()
+    }
+
+    @Test
+    fun `sends interested message to peer after receiving a have message`() {
+        val infohash = torrent.load(lame).get()
+        val sock = initiateRemotePeer(infohash)
+        sock.outputStream.write(WireProtocolEncoder.encode(4, 0))
+        sock.outputStream.flush()
+
+        assertDoesNotThrow { torrent.handleSmallMessages().get() }
+
+        val message = WireProtocolDecoder.decode(sock.inputStream.readNBytes(5), 0)
+
+        assertThat(message.messageId, equalTo(2.toByte()))
+
+        torrent.stop().get()
+        sock.close()
+    }
 
     private fun initiateRemotePeer(infohash: String): Socket {
         mockHttp(mapOf("interval" to 360, "complete" to 0, "incomplete" to 0, "tracker id" to "1234",

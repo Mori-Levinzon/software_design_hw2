@@ -20,27 +20,31 @@ class ConnectedPeerManager(
      * is choked.
      */
     fun handleIncomingMessages() : Unit {
-        val message = socket.getInputStream().readBytes()
-        if (WireProtocolDecoder.length(message) == 0) return
-        val messageId = WireProtocolDecoder.messageId(message)
-        when(messageId) {
-            0.toByte() -> connectedPeer = connectedPeer.copy(peerChoking = true)
-            1.toByte() -> connectedPeer = connectedPeer.copy(peerChoking = false)
-            2.toByte() -> connectedPeer = connectedPeer.copy(peerInterested = true)
-            3.toByte() -> connectedPeer = connectedPeer.copy(peerInterested = false)
-            4.toByte() -> { //have
-                val pieceIndex = WireProtocolDecoder.decode(message, 1).ints[0].toLong()
-                availablePieces.add(pieceIndex)
+        val availableBytes = socket.getInputStream().available()
+        if (availableBytes <= 0) return
+        var message = socket.getInputStream().readNBytes(availableBytes)
+        while (message.isNotEmpty()) {
+            val messageId = WireProtocolDecoder.messageId(message)
+            when(messageId) {
+                0.toByte() -> connectedPeer = connectedPeer.copy(peerChoking = true)
+                1.toByte() -> connectedPeer = connectedPeer.copy(peerChoking = false)
+                2.toByte() -> connectedPeer = connectedPeer.copy(peerInterested = true)
+                3.toByte() -> connectedPeer = connectedPeer.copy(peerInterested = false)
+                4.toByte() -> { //have
+                    val pieceIndex = WireProtocolDecoder.decode(message, 1).ints[0].toLong()
+                    availablePieces.add(pieceIndex)
+                }
+                6.toByte() -> { //request
+                    if(connectedPeer.amChoking) return
+                    val decodedMessage = WireProtocolDecoder.decode(message, 3)
+                    val index = decodedMessage.ints[0]
+                    val begin = decodedMessage.ints[1]
+                    val length = decodedMessage.ints[2]
+                    requestedPieces.add(index.toLong())
+                    //TODO what should I do with begin and length?
+                }
             }
-            6.toByte() -> { //request
-                if(connectedPeer.amChoking) return
-                val decodedMessage = WireProtocolDecoder.decode(message, 3)
-                val index = decodedMessage.ints[0]
-                val begin = decodedMessage.ints[1]
-                val length = decodedMessage.ints[2]
-                requestedPieces.add(index.toLong())
-                //TODO what should I do with begin and length?
-            }
+            message = message.sliceArray(IntRange(WireProtocolDecoder.length(message) + 4, message.size - 1))
         }
     }
 
