@@ -390,7 +390,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 if(!decodedHandshake.infohash.contentEquals(infohashByteArray))
                     throw PeerConnectException("Infohashes do not agree")
 
-                val newPeer = KnownPeer(peer.ip, peer.port, decodedHandshake.peerId.toString())
+                val newPeer = KnownPeer(peer.ip, peer.port, String(decodedHandshake.peerId))
                 addNewPeer(infohash, s, it, newPeer, peer)
             }
             catch (e: Exception) {
@@ -551,7 +551,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                             throw PeerConnectException("No such infohash")
                         } else { //torrent exists
                             val newPeer = KnownPeer(socket.inetAddress.hostAddress, socket.port,
-                                    decodedHandshake.peerId.toString())
+                                    String(decodedHandshake.peerId))
                             addNewPeer(newInfohash, socket, it, newPeer, null)
                             socket.getOutputStream().write(WireProtocolEncoder.handshake(decodedHandshake.infohash,
                                     this.getPeerID().toByteArray()))
