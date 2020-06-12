@@ -58,10 +58,10 @@ class Ben(val byteArray: ByteArray, var i: Int = 0) {
                 }
                 else if (obj as String == "pieces") {
                     isPieces = true
-                    val startIndex = i
-                    decode()
-                    val info = byteArray.sliceArray(IntRange(startIndex, i - 1))
-                    put(obj as String, info)
+                    //val startIndex = i
+                    //decode()
+                    //val info = byteArray.sliceArray(IntRange(startIndex, i - 1))
+                    put(obj as String, decode())
                 }
                 else if (obj as String == "peers") {
                     isPeers = true

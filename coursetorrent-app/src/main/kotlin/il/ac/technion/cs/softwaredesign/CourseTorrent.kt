@@ -55,6 +55,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     database.trackersStatsCreate(infohash, mapOf())
                     database.piecesStatsCreate(infohash, mapOf())
                     database.torrentsCreate(infohash, Ben(torrent).decode() as Map<String, Any>)
+                    //TODO make database for each piece
                 }catch (e: IllegalStateException) {
                     e.printStackTrace()
                     throw IllegalStateException("Same infohash already loaded")
@@ -830,7 +831,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             database.torrentsRead(infohash).thenApply {
                 //val pieces = it["pieces"] as String
                 val piecelength = ((it["info"] as Map<String, Any>)["piece length"] as Long)
-                val files = it["files"] as Map<String,Map<String,Any>> //TODO @Mori what if it's single file?, ["info"]
+                val files = it["files"] as Map<String,Map<String,Any>> //TODO ["info"]
                 var fileOffset = 0
                 for ((file, fileMap) in files){
                     var fileEntireByteArray = byteArrayOf()
@@ -869,7 +870,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         return database.torrentsRead(infohash).thenApply { torrent->
             torrent ?: throw IllegalStateException("torrent does not exist")
             var allfilesPieces : ByteArray = byteArrayOf()
-            files.map { it -> it.value }.forEach { it-> allfilesPieces += it }
+            files.map { it -> it.value }.forEach { it-> allfilesPieces += it } //TODO order by files in metainfo file
             val pieces = (torrent["info"] as Map<String, Any>)["pieces"] as ByteArray
             val pieceLength = (torrent["info"] as Map<String, Any>)["piece length"] as Long
             val zeroPadding = pieceLength * pieces.size / 20 - allfilesPieces.size
@@ -879,7 +880,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             var allfilesPiecesIndex = 0
             var piecesMap = mutableMapOf<Long,ByteArray>()
             var indexMap =0
-            for (i in pieces.indices step 20){ //TODO there are bugs here. Discuss with Mori
+            for (i in pieces.indices step 20){
                 val valueToStoreInThatPieceStorage = allfilesPieces.copyOfRange(allfilesPiecesIndex,allfilesPiecesIndex+pieceLength.toInt())
                 allfilesPiecesIndex += pieceLength.toInt()
                 database.indexedPieceUpdate(infohash, indexMap.toLong(), valueToStoreInThatPieceStorage)
@@ -896,23 +897,26 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      */
     fun recheck(infohash: String): CompletableFuture<Boolean> {
         var isAllPiecesOk = true
-        return database.torrentsRead(infohash).thenApply {torrent ->
+        return database.torrentsRead(infohash).thenApply { torrent ->
             torrent ?: throw IllegalStateException("torrent does not exist")
-            val pieces = torrent["pieces"] as String
-            val i =0
+            val pieces = (torrent["info"] as Map<String, Any>)["pieces"] as ByteArray
+            return@thenApply pieces
+        }.thenCompose { pieces ->
+            val i = 0
             database.piecesStatsRead(infohash).thenApply { loadedPiecesMap ->
                 val mutableloadedPiecesMap = loadedPiecesMap.toMutableMap()
                 for (index in mutableloadedPiecesMap.keys) {
                     database.indexedPieceRead(infohash,index).thenAccept { pieceContent->
-                        if (! sha1hash(pieceContent).equals(pieces.substring(i,i+20))){
+                        if (! sha1hash(pieceContent).equals(pieces.sliceArray(IntRange(i,i+19)))){
                             isAllPiecesOk = false
                             database.indexedPieceUpdate(infohash,index,ByteArray(0))
                             mutableloadedPiecesMap[index]!!.isValid = false
                         }
-                    }
+                    }.join() //TODO remove
                 }
                 database.piecesStatsUpdate(infohash,mutableloadedPiecesMap)
             }
+        }.thenApply {
             isAllPiecesOk
         }
     }
