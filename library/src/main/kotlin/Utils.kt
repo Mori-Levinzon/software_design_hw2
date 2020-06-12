@@ -5,6 +5,7 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.lang.StringBuilder
 import java.security.MessageDigest
+import java.time.Duration
 import kotlin.random.Random
 import java.util.*
 import kotlin.Comparator
@@ -87,6 +88,30 @@ class Utils {
             }
             toReturn = toReturn + params.last().first + "=" + params.last().second
             return toReturn
+        }
+
+        fun PieceIndexStats.toMap() : Map<String, Any> {
+            return mapOf(
+                    "uploaded" to this.uploaded,
+                    "downloaded" to this.downloaded,
+                    "left" to this.left,
+                    "wasted" to this.wasted,
+                    "isValid" to if (this.isValid) { 1 } else { 0 },
+                    "leechTime" to this.leechTime.toString(),
+                    "seedTime" to this.seedTime.toString()
+            )
+        }
+
+        fun Map<String, Any>.toPieceIndexStats() : PieceIndexStats {
+            return PieceIndexStats(
+                    this["uploaded"] as Long,
+                    this["downloaded"] as Long,
+                    this["left"] as Long,
+                    this["wasted"] as Long,
+                    (this["isValid"] as Long) != (0.toLong()),
+                    Duration.parse(this["leechTime"] as String),
+                    Duration.parse(this["seedTime"] as String)
+            )
         }
     }
 }

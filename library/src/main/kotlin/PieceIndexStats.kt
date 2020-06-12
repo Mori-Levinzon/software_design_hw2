@@ -1,4 +1,4 @@
-package il.ac.technion.cs.softwaredesign.il.ac.technion.cs.softwaredesign
+package il.ac.technion.cs.softwaredesign
 
 import java.time.Duration
 

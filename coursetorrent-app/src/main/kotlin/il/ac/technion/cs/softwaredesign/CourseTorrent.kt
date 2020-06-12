@@ -9,7 +9,6 @@ import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
 import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
-import il.ac.technion.cs.softwaredesign.il.ac.technion.cs.softwaredesign.PieceIndexStats
 import java.lang.Thread.sleep
 import java.net.ServerSocket
 import java.net.Socket
@@ -45,20 +44,22 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @return The infohash of the torrent, i.e., the SHA-1 of the `info` key of [torrent].
      */
     fun load(torrent: ByteArray): CompletableFuture<String> {
-        val torrentData = TorrentFile.deserialize(torrent)
-        val infohash = torrentData.infohash
         return CompletableFuture.supplyAsync {
-            try {
-                database.announcesCreate(infohash, torrentData.announceList)
-                database.peersCreate(infohash, listOf())
-                database.trackersStatsCreate(infohash, mapOf())
-                database.piecesStatsCreate(infohash, mapOf())
-                database.torrentsCreate(infohash, Ben(torrent).decode() as Map<String, Any>)
-            }catch (e: IllegalStateException) {
-                e.printStackTrace()
-                throw IllegalStateException("Same infohash already loaded")
+            TorrentFile.deserialize(torrent)
+        }.thenCompose { torrentData ->
+            val infohash = torrentData.infohash
+            database.announcesCreate(infohash, torrentData.announceList).thenApply {
+                try {
+                    database.peersCreate(infohash, listOf())
+                    database.trackersStatsCreate(infohash, mapOf())
+                    database.piecesStatsCreate(infohash, mapOf())
+                    database.torrentsCreate(infohash, Ben(torrent).decode() as Map<String, Any>)
+                }catch (e: IllegalStateException) {
+                    e.printStackTrace()
+                    throw IllegalStateException("Same infohash already loaded")
+                }
+                infohash
             }
-            infohash
         }
     }
 
@@ -70,19 +71,18 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
     fun unload(infohash: String): CompletableFuture<Unit> {
-        return CompletableFuture.supplyAsync {
+        return database.announcesDelete(infohash).thenApply {
             try {
-                database.announcesDelete(infohash)
-                database.peersDelete(infohash)
                 this.connectedPeers.remove(infohash)
+                database.peersDelete(infohash)
                 database.trackersStatsDelete(infohash)
                 database.piecesStatsDelete(infohash)
 //                database.allpiecesDelete(infohash)//TODO: create a read for the number of pieces that thier DB need to be destroyed
                 database.torrentsDelete(infohash)
-            }catch (e: IllegalArgumentException) {
+            }catch (e: Exception) {
                 throw IllegalArgumentException("Infohash doesn't exist")
             }
-
+            Unit
         }
 
     }
@@ -866,10 +866,10 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             torrent ?: throw IllegalStateException("torrent does not exist")
             var allfilesPieces : ByteArray = byteArrayOf()
             files.map { it -> it.value }.forEach { it-> allfilesPieces+it }
-            val pieces = torrent["pieces"] as String
-            val pieceLength = torrent["piece Length"] as Long
-            val zeroPadding = pieceLength * pieces.length / 20 - allfilesPieces.size
-            if (zeroPadding < 0) {
+            val pieces = (torrent["info"] as Map<String, Any>)["pieces"] as ByteArray
+            val pieceLength = (torrent["info"] as Map<String, Any>)["piece length"] as Long
+            val zeroPadding = pieceLength * pieces.size / 20 - allfilesPieces.size
+            if (zeroPadding > 0) {
                 allfilesPieces += ByteArray(zeroPadding.toInt()) //padding with zero if there is content is to short
             }
             var allfilesPiecesIndex = 0

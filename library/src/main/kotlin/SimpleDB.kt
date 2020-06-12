@@ -1,7 +1,8 @@
 package il.ac.technion.cs.softwaredesign
 
 import com.google.inject.Inject
-import il.ac.technion.cs.softwaredesign.il.ac.technion.cs.softwaredesign.PieceIndexStats
+import il.ac.technion.cs.softwaredesign.Utils.Companion.toMap
+import il.ac.technion.cs.softwaredesign.Utils.Companion.toPieceIndexStats
 import il.ac.technion.cs.softwaredesign.storage.SecureStorage
 import il.ac.technion.cs.softwaredesign.storage.SecureStorageFactory
 import java.lang.IllegalStateException
@@ -24,23 +25,23 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     private val storage : SecureStorageFactory = storageFactory
 
 
-    fun torrentsCreate(key: String, value: Map<String, Any>) : Unit {
-        torrentsStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray())}
+    fun torrentsCreate(key: String, value: Map<String, Any>) : CompletableFuture<Unit> {
+        return torrentsStorage.thenCompose { create(it, key, Ben.encodeStr(value).toByteArray())}
     }
-    fun announcesCreate(key: String, value: List<List<String>>) : Unit {
-        announcesStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray())}
+    fun announcesCreate(key: String, value: List<List<String>>) : CompletableFuture<Unit> {
+        return announcesStorage.thenCompose { create(it, key, Ben.encodeStr(value).toByteArray())}
     }
-    fun peersCreate(key: String, value: List<Map<String, String>>) : Unit {
-        peersStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray())}
+    fun peersCreate(key: String, value: List<Map<String, String>>) : CompletableFuture<Unit> {
+        return peersStorage.thenCompose { create(it, key, Ben.encodeStr(value).toByteArray())}
     }
-    fun trackersStatsCreate(key: String, value: Map<String, Map<String, Any>>) : Unit {
-        trackersStatsStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray())}
+    fun trackersStatsCreate(key: String, value: Map<String, Map<String, Any>>) : CompletableFuture<Unit> {
+        return trackersStatsStorage.thenCompose { create(it, key, Ben.encodeStr(value).toByteArray())}
     }
-    fun piecesStatsCreate(key: String, value: Map<Long, PieceIndexStats>) : Unit {
-        piecesStatsStorage.thenApply { create(it, key, Ben.encodeStr(value).toByteArray())}
+    fun piecesStatsCreate(key: String, value: Map<Long, PieceIndexStats>) : CompletableFuture<Unit> {
+        return piecesStatsStorage.thenCompose { create(it, key, Ben.encodeStr(value.mapValues { pair -> pair.value.toMap() }).toByteArray())}
     }
-    fun indexedPieceCreate(infohash: String, index: Long, value: ByteArray) : Unit {//this one is rather Unnecessary since we can create a database each time we update a piece
-        storage.open((infohash+index).toByteArray(charset)).thenCompose{ create(it, (infohash+index), Ben.encodeStr(value).toByteArray())}
+    fun indexedPieceCreate(infohash: String, index: Long, value: ByteArray) : CompletableFuture<Unit> {//this one is rather Unnecessary since we can create a database each time we update a piece
+        return storage.open((infohash+index).toByteArray(charset)).thenCompose{ create(it, (infohash+index), Ben.encodeStr(value).toByteArray())}
     }
 
     fun torrentsRead(key: String) : CompletableFuture<Map<String, Any>> {
@@ -64,12 +65,10 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     }
 
     fun peersRead(key: String) : CompletableFuture<List<Map<String, String>>> {
-        return peersStorage.thenApply { read(it,key) }
-            .thenCompose { dbContent ->  dbContent }//to extract the value from the CompletableFuture
-            .thenApply {dbContent->
-                dbContent?.let { Ben(dbContent).decode() } as? List<Map<String, String>>
+        return peersStorage.thenCompose { read(it,key) }.thenApply { dbContent ->
+            dbContent?.let { Ben(dbContent).decode() } as? List<Map<String, String>>
                     ?: throw IllegalStateException("Database contents disobey type rules")
-            }
+        }
     }
 
     fun trackersStatsRead(key: String) : CompletableFuture<Map<String, Map<String, Any>>> {
@@ -85,7 +84,8 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
         return piecesStatsStorage.thenApply { read(it,key) }
                 .thenCompose { dbContent ->  dbContent }//to extract the value from the CompletableFuture
                 .thenApply {dbContent->
-                    dbContent?.let { Ben(dbContent).decode() } as? Map<Long, PieceIndexStats>
+                    (dbContent?.let { Ben(dbContent).decode() } as? Map<Long, Map<String, Any>>)?.
+                    mapValues { it.value.toPieceIndexStats() }
                             ?: throw IllegalStateException("Database contents disobey type rules")
                 }
     }
@@ -112,7 +112,7 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
         trackersStatsStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray())}
     }
     fun piecesStatsUpdate(key: String, value: Map<Long, PieceIndexStats>) : Unit {
-        piecesStatsStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray())}
+        piecesStatsStorage.thenApply {update(it, key, Ben.encodeStr(value.mapValues { it.value.toMap() }).toByteArray())}
     }
 
     fun indexedPieceUpdate(infohash: String, index: Long, value: ByteArray) : Unit {
@@ -120,30 +120,32 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
                 .thenApply {update(it, (infohash+index.toString()), value)}
     }
 
-    fun torrentsDelete(key: String) : Unit {
-        torrentsStorage.thenApply { delete(it, key) }
+    fun torrentsDelete(key: String) : CompletableFuture<Unit> {
+        return torrentsStorage.thenApply { delete(it, key) }
     }
-    fun announcesDelete(key: String) : Unit {
-        announcesStorage.thenApply { delete(it, key) }
+    fun announcesDelete(key: String) : CompletableFuture<Unit> {
+        return announcesStorage.thenApply { delete(it, key) }
     }
-    fun peersDelete(key: String) : Unit {
-        peersStorage.thenApply { delete(it, key) }
+    fun peersDelete(key: String) : CompletableFuture<Unit> {
+        return peersStorage.thenApply { delete(it, key) }
     }
-    fun trackersStatsDelete(key: String) : Unit {
-        trackersStatsStorage.thenApply { delete(it, key) }
+    fun trackersStatsDelete(key: String) : CompletableFuture<Unit> {
+        return trackersStatsStorage.thenApply { delete(it, key) }
     }
-    fun piecesStatsDelete(key: String) : Unit {
-        piecesStatsStorage.thenApply { delete(it, key) }
+    fun piecesStatsDelete(key: String) : CompletableFuture<Unit> {
+        return piecesStatsStorage.thenApply { delete(it, key) }
     }
 
-    fun indexedPieceDelete(infohash: String, index: Long) : Unit {
-        storage.open((infohash+index).toByteArray(charset))
+    fun indexedPieceDelete(infohash: String, index: Long) : CompletableFuture<Unit> {
+        return storage.open((infohash+index).toByteArray(charset))
                 .thenApply { delete(it, infohash+index.toString()) }
     }
-    fun allpiecesDelete(infohash: String, piecesSize: Long) : Unit {
-        for (i in 0..piecesSize){
-            storage.open((infohash+i).toByteArray(charset))
-                    .thenApply { delete(it, infohash+i.toString()) }
+    fun allpiecesDelete(infohash: String, piecesSize: Long) : CompletableFuture<Unit> {
+        return CompletableFuture.supplyAsync {
+            for (i in 0..piecesSize){
+                storage.open((infohash+i).toByteArray(charset))
+                        .thenApply { delete(it, infohash+i.toString()) }
+            }
         }
     }
 

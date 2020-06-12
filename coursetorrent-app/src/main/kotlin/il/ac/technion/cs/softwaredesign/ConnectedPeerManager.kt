@@ -1,9 +1,6 @@
 package il.ac.technion.cs.softwaredesign
 
-import com.google.j2objc.annotations.WeakOuter
-import il.ac.technion.cs.softwaredesign.il.ac.technion.cs.softwaredesign.PieceIndexStats
 import java.net.Socket
-import java.util.*
 
 class ConnectedPeerManager(
         var connectedPeer: ConnectedPeer,
@@ -31,7 +28,7 @@ class ConnectedPeerManager(
             1.toByte() -> connectedPeer = connectedPeer.copy(peerChoking = false)
             2.toByte() -> connectedPeer = connectedPeer.copy(peerInterested = true)
             3.toByte() -> connectedPeer = connectedPeer.copy(peerInterested = false)
-            4.toByte() -> { //choke
+            4.toByte() -> { //have
                 val pieceIndex = WireProtocolDecoder.decode(message, 1).ints[0].toLong()
                 availablePieces.add(pieceIndex)
             }
