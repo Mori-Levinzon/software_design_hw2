@@ -303,7 +303,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     shareRatio = uploaded.toDouble() / downloaded.toDouble()
                 }
             }
-            havePieces = (torrent["pieces"] as String).toLong()/20 //pieces is a string build from 20 byte sha1(piece) * #pieces
+            havePieces = ((torrent["info"] as Map<String, Any>)["pieces"] as ByteArray).size.toLong() / 20 //pieces is a string build from 20 byte sha1(piece) * #pieces
             return@thenApply TorrentStats(uploaded, downloaded, left, wasted, shareRatio, pieces, havePieces, leechTime, seedTime)
         }
     }
@@ -548,6 +548,8 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                             val newPeer = KnownPeer(socket.inetAddress.hostAddress, socket.port,
                                     decodedHandshake.peerId.toString())
                             addNewPeer(newInfohash, socket, it, newPeer, null)
+                            socket.getOutputStream().write(WireProtocolEncoder.handshake(decodedHandshake.infohash,
+                                    this.getPeerID().toByteArray()))
                         }
                         newPeerAcceptor()
                     }
@@ -824,9 +826,9 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             val piecesStatsThatAlreadyBeenDownloadedMap= it.toMutableMap()
             val indexesWeHave =piecesStatsThatAlreadyBeenDownloadedMap.map { it -> it.key }
             database.torrentsRead(infohash).thenApply {
-                val pieces = it["pieces"] as String
-                val piecelength = it["piece length"] as Long
-                val files = it["files"] as Map<String,Map<String,Any>>
+                //val pieces = it["pieces"] as String
+                val piecelength = ((it["info"] as Map<String, Any>)["piece length"] as Long)
+                val files = it["files"] as Map<String,Map<String,Any>> //TODO @Mori what if it's single file?, ["info"]
                 var fileOffset = 0
                 for ((file, fileMap) in files){
                     var fileEntireByteArray = byteArrayOf()
@@ -865,7 +867,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         return database.torrentsRead(infohash).thenApply { torrent->
             torrent ?: throw IllegalStateException("torrent does not exist")
             var allfilesPieces : ByteArray = byteArrayOf()
-            files.map { it -> it.value }.forEach { it-> allfilesPieces+it }
+            files.map { it -> it.value }.forEach { it-> allfilesPieces += it }
             val pieces = (torrent["info"] as Map<String, Any>)["pieces"] as ByteArray
             val pieceLength = (torrent["info"] as Map<String, Any>)["piece length"] as Long
             val zeroPadding = pieceLength * pieces.size / 20 - allfilesPieces.size
@@ -875,7 +877,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             var allfilesPiecesIndex = 0
             var piecesMap = mutableMapOf<Long,ByteArray>()
             var indexMap =0
-            for (i in pieces.indices step 20){
+            for (i in pieces.indices step 20){ //TODO there are bugs here. Discuss with Mori
                 val valueToStoreInThatPieceStorage = allfilesPieces.copyOfRange(allfilesPiecesIndex,allfilesPiecesIndex+pieceLength.toInt())
                 allfilesPiecesIndex += pieceLength.toInt()
                 database.indexedPieceUpdate(infohash, indexMap.toLong(), valueToStoreInThatPieceStorage)

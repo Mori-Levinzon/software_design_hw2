@@ -19,6 +19,7 @@ import io.github.vjames19.futures.jdk8.ImmediateFuture
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertDoesNotThrow
 import org.junit.jupiter.api.assertThrows
+import java.net.Socket
 import java.util.concurrent.CompletableFuture
 
 class MockedCourseTorrentStaffTest {
@@ -227,6 +228,28 @@ class MockedCourseTorrentStaffTest {
         every { any<String>().httpGet() } returns myReq
     }
 
+    private fun mockHttpStringStartsWith(prefixes: List<Pair<String, Any>>) {
+        mockkObject(Fuel)
+        var stringSlot = slot<String>()
+        every { capture(stringSlot).httpGet() } answers {
+            val defaultReq = mockk<Request>()
+            val defaultRes = Ben.encodeByteArray(mapOf("failure reason" to "Connection failed"))
+            every { defaultReq.response() } returns
+                    ResponseResultOf<ByteArray>(defaultReq, Response.error(), Result.success(defaultRes))
+            var finalRequest = defaultReq
+            for((prefix, response) in prefixes) {
+                val myReq = mockk<Request>()
+                val res = Ben.encodeByteArray(response)
+                every { myReq.response() } returns
+                        ResponseResultOf<ByteArray>(myReq, Response.error(), Result.success(res))
+                if(stringSlot.captured.startsWith(prefix)) {
+                    finalRequest = myReq
+                }
+            }
+            finalRequest
+        }
+    }
+
     @Test
     fun `after load, infohash calculated correctly`() {
         val infohash = torrent.load(debian).get()
@@ -258,6 +281,9 @@ class MockedCourseTorrentStaffTest {
 
     @Test
     fun `client scrapes tracker and updates statistics`() {
+        mockHttpStringStartsWith(listOf(
+                "https://127.0.0.1:8082/scrape" to mapOf("files" to mapOf("myinfohash" to
+                        mapOf("complete" to 0, "incomplete" to 0, "downloaded" to 0)))))
         val infohash = torrent.load(lame).get()
 
         /* Tracker has infohash, 0 complete, 0 downloaded, 0 incomplete, no name key */
@@ -351,15 +377,15 @@ class MockedCourseTorrentStaffTest {
         Assertions.assertFalse(done)
     }
 
-//    @Test
-//    fun `starts listening and responds to connection and handshake`() {
-//        val infohash = torrent.load(lame).get()
-//
-//        val sock = initiateRemotePeer(infohash)
-//
-//        torrent.stop().get()
-//        sock.close()
-//    }
+    @Test
+    fun `starts listening and responds to connection and handshake`() {
+        val infohash = torrent.load(lame).get()
+
+        val sock = initiateRemotePeer(infohash)
+
+        torrent.stop().get()
+        sock.close()
+    }
 
 //    @Test
 //    fun `lists remotely connected peer in known and connected peers`() {
@@ -446,39 +472,41 @@ class MockedCourseTorrentStaffTest {
 //        sock.close()
 //    }
 
-//    private fun initiateRemotePeer(infohash: String): Socket {
-//        torrent.torrentStats(infohash).thenCompose {
-//            torrent.announce(
-//                    infohash,
-//                    TorrentEvent.STARTED,
-//                    uploaded = it.uploaded,
-//                    downloaded = it.downloaded,
-//                    left = it.left
-//            )
-//        }.join()
-//
-//        val port: Int = TODO("Get port from announce")
-//
-//        assertDoesNotThrow { torrent.start().join() }
-//
-//        val sock = assertDoesNotThrow { Socket("127.0.0.1", port) }
-//        sock.outputStream.write(
-//                WireProtocolEncoder.handshake(
-//                        hexStringToByteArray(infohash),
-//                        hexStringToByteArray(infohash.reversed())
-//                )
-//        )
-//
-//        assertDoesNotThrow { torrent.handleSmallMessages().join() }
-//
-//        val output = sock.inputStream.readNBytes(68)
-//
-//        val (otherInfohash, otherPeerId) = StaffWireProtocolDecoder.handshake(output)
-//
-//        Assertions.assertTrue(otherInfohash.contentEquals(hexStringToByteArray(infohash)))
-//
-//        return sock
-//    }
+    private fun initiateRemotePeer(infohash: String): Socket {
+        mockHttp(mapOf("interval" to 360, "complete" to 0, "incomplete" to 0, "tracker id" to "1234",
+                "peers" to ubyteArrayOf(127u, 0u, 0u, 22u, 26u, 231u, 127u, 0u, 0u, 21u, 26u, 233u).toByteArray()))
+        torrent.torrentStats(infohash).thenCompose {
+            torrent.announce(
+                    infohash,
+                    TorrentEvent.STARTED,
+                    uploaded = it.uploaded,
+                    downloaded = it.downloaded,
+                    left = it.left
+            )
+        }.join()
+
+        val port: Int = 6881
+
+        assertDoesNotThrow { torrent.start().join() }
+
+        val sock = assertDoesNotThrow { Socket("127.0.0.1", port) }
+        sock.outputStream.write(
+                WireProtocolEncoder.handshake(
+                        hexStringToByteArray(infohash),
+                        hexStringToByteArray(infohash.reversed())
+                )
+        )
+
+        assertDoesNotThrow { torrent.handleSmallMessages().join() }
+
+        val output = sock.inputStream.readNBytes(68)
+
+        val (otherInfohash, otherPeerId) = WireProtocolDecoder.handshake(output)
+
+        Assertions.assertTrue(otherInfohash.contentEquals(hexStringToByteArray(infohash)))
+
+        return sock
+    }
 }
 
-//fun hexStringToByteArray(input: String) = input.chunked(2).map { it.toUpperCase().toInt(16).toByte() }.toByteArray()
+fun hexStringToByteArray(input: String) = input.chunked(2).map { it.toUpperCase().toInt(16).toByte() }.toByteArray()

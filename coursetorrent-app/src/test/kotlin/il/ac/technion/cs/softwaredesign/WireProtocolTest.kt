@@ -101,5 +101,5 @@ class WireProtocolTest {
 
 
 
-@ExperimentalUnsignedTypes
-fun hexStringToByteArray(input: String) = input.chunked(2).map { it.toUpperCase().toUByte(16).toByte() }.toByteArray()
+//@ExperimentalUnsignedTypes
+//fun hexStringToByteArray(input: String) = input.chunked(2).map { it.toUpperCase().toUByte(16).toByte() }.toByteArray()
