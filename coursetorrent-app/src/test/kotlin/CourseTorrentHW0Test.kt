@@ -232,9 +232,8 @@ class CourseTorrentHW0Test {
     fun `after load, can't load again`() {
         torrent.load(debian).get()
 
-//        assertThrows<IllegalStateException> { torrent.load(debian).get()}
-        assertThrows<ExecutionException> { torrent.load(debian).get()}
-        //TODO: check if there is a way the get the correct exception from the CompatableFuture
+        val throwable = assertThrows<ExecutionException> { torrent.load(debian).get()}
+        assertThat(throwable.cause!!, isA<IllegalStateException>())
     }
 
     @Test
