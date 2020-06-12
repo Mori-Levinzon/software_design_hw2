@@ -53,8 +53,17 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 try {
                     database.peersCreate(infohash, listOf())
                     database.trackersStatsCreate(infohash, mapOf())
-                    database.piecesStatsCreate(infohash, mapOf())
+
+                    val metaInfo = Ben(torrent).decode() as Map<String, Any>
+                    val numOfPieces = ((metaInfo["info"] as Map<String,Any>)["pieces"] as ByteArray).size /20
+                    val piecesMap : MutableMap<Long,PieceIndexStats> = mutableMapOf()
+                    for (i in 0 until numOfPieces){
+                        piecesMap[i.toLong()] = PieceIndexStats(0,0,0,0,false, Duration.ZERO, Duration.ZERO)
+                    }
+                    database.piecesStatsCreate(infohash, piecesMap.toMap() )
+
                     database.torrentsCreate(infohash, Ben(torrent).decode() as Map<String, Any>)
+//                    database.allpiecesCreate(infohash, numOfPieces.toLong())
                     //TODO make database for each piece
                 }catch (e: IllegalStateException) {
                     e.printStackTrace()
@@ -630,15 +639,17 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                             sha1hash(block) != pieces[pieceIndex.toInt()].toString()) throw PieceHashException("piece does not match the hash from the meta-info file")
 
                     //update the stats db
-                    database.piecesStatsRead(infohash).thenApply { torrentStats->
-                        val pieceStats  = torrentStats[pieceIndex]!!
+                    database.piecesStatsRead(infohash).thenApply { immutabletorrentStats->
+                        var torrentStats = immutabletorrentStats.toMutableMap()
+                        var pieceStats  = torrentStats[pieceIndex]!!
                         pieceStats.downloaded = pieceStats.downloaded + (block.size)
                         pieceStats.left = (pieceStats.left ?: (info?.get("pieces") as Long ?: 16000 ) ) - (block.size)
                         pieceStats.isValid = true
                         //TODO: what other data should be save except the two rows above
-                        pieceStats
-                    }.thenApply { pieceStats ->
-                        database.piecesStatsUpdate(infohash, pieceStats as Map<Long, PieceIndexStats>)
+                        torrentStats[pieceIndex] = pieceStats
+                        torrentStats
+                    }.thenApply { updatedTorrentStats ->
+                        database.piecesStatsUpdate(infohash, updatedTorrentStats)
                     }
                 }
                 catch (e: Exception) {
@@ -867,25 +878,56 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @throws IllegalArgumentException if [infohash] is not loaded,
      */
     fun loadFiles(infohash: String, files: Map<String, ByteArray>): CompletableFuture<Unit> {
+        var allfilesPieces : ByteArray = byteArrayOf()
+        var pieceLength : Long = 0
+        var pieces: ByteArray = ByteArray(0)
         return database.torrentsRead(infohash).thenApply { torrent->
             torrent ?: throw IllegalStateException("torrent does not exist")
-            var allfilesPieces : ByteArray = byteArrayOf()
-            files.map { it -> it.value }.forEach { it-> allfilesPieces += it } //TODO order by files in metainfo file
-            val pieces = (torrent["info"] as Map<String, Any>)["pieces"] as ByteArray
-            val pieceLength = (torrent["info"] as Map<String, Any>)["piece length"] as Long
+
+            allfilesPieces = joinAllFilesToOneByteArray(torrent, allfilesPieces, files)
+
+            pieces = (torrent["info"] as Map<String, Any>)["pieces"] as ByteArray
+            pieceLength = (torrent["info"] as Map<String, Any>)["piece length"] as Long
             val zeroPadding = pieceLength * pieces.size / 20 - allfilesPieces.size
             if (zeroPadding > 0) {
                 allfilesPieces += ByteArray(zeroPadding.toInt()) //padding with zero if there is content is to short
             }
-            var allfilesPiecesIndex = 0
-            var piecesMap = mutableMapOf<Long,ByteArray>()
-            var indexMap =0
-            for (i in pieces.indices step 20){
-                val valueToStoreInThatPieceStorage = allfilesPieces.copyOfRange(allfilesPiecesIndex,allfilesPiecesIndex+pieceLength.toInt())
-                allfilesPiecesIndex += pieceLength.toInt()
-                database.indexedPieceUpdate(infohash, indexMap.toLong(), valueToStoreInThatPieceStorage)
+            return@thenApply pieces
+        }.thenCompose { pieces ->
+            database.piecesStatsRead(infohash)
+        }.thenApply {immutablepiecesStatsMap->
+                        var piecesStatsMap = immutablepiecesStatsMap.toMutableMap()
+                        var allfilesPiecesIndex = 0
+                        var indexMap =0
+                        for (i in pieces.indices step 20){
+                            val valueToStoreInThatPieceStorage = allfilesPieces.copyOfRange(allfilesPiecesIndex,allfilesPiecesIndex+pieceLength.toInt())
+                            allfilesPiecesIndex += pieceLength.toInt()
+                            database.indexedPieceUpdate(infohash, indexMap.toLong(), valueToStoreInThatPieceStorage)
+                            piecesStatsMap[indexMap++.toLong()]?.isValid  = true
+                        }
+            database.piecesStatsUpdate(infohash, piecesStatsMap)
             }
+
+    }
+
+    private fun joinAllFilesToOneByteArray(torrent: Map<String, Any>, allfilesPieces: ByteArray, files: Map<String, ByteArray>): ByteArray {
+        var allfilesPieces1 = allfilesPieces
+        val torrentFiles = (torrent["info"] as Map<String, Any>)["files"] as ArrayList<Map<String, *>>
+        if (torrentFiles.isNotEmpty()) {// multiple  file mode
+            //get the file order
+            var filesList: ArrayList<Map<String, *>> = torrentFiles
+            for (fileMap: Map<String, *> in filesList) {
+                val filePathList = fileMap["path"] as List<String>
+                var fileName = filePathList[filePathList.lastIndex]
+
+                allfilesPieces1 += files[fileName] as ByteArray
+            }
+
+        } else {// single  file mode
+            val fileName = (torrent["info"] as Map<String, Any>)["name"] as String
+            allfilesPieces1 = files[fileName] as ByteArray
         }
+        return allfilesPieces1
     }
 
     /**
