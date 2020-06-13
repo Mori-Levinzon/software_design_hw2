@@ -4,6 +4,7 @@ package il.ac.technion.cs.softwaredesign
 
 import com.google.inject.Inject
 import il.ac.technion.cs.softwaredesign.Utils.Companion.byteArrayToInfohash
+import il.ac.technion.cs.softwaredesign.Utils.Companion.infohashToByteArray
 import il.ac.technion.cs.softwaredesign.Utils.Companion.sha1hash
 import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
@@ -794,8 +795,9 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         val res = mutableMapOf<KnownPeer, List<Long>>()
         return database.piecesStatsRead(infohash).thenApply { piecesStatesWeHaveMap ->//instead of loading the pieces whic hare heavy sized we get through their stats
                 piecesStatesWeHaveMap ?: throw IllegalStateException("torrent does not exist")
+                var mutablePiecesWehaveMap = piecesStatesWeHaveMap.toMutableMap().filter { it -> it.value.isValid }
                 this.connectedPeers[infohash]?.filter { connectedPeer -> !connectedPeer.connectedPeer.peerChoking }?.forEach { unchokedPeer ->
-                    val piecesWeWantFromPeer = unchokedPeer.availablePieces.filter { index -> !piecesStatesWeHaveMap.containsKey(index) }
+                    val piecesWeWantFromPeer = unchokedPeer.availablePieces.filter { index -> !mutablePiecesWehaveMap.containsKey(index) }
                     val indexBiggerOrEqualThanIndex = piecesWeWantFromPeer.filter { index -> index >= startIndex }.map { it -> it.toLong() as Long}.toMutableList()
                     val indexSmallerThanIndex = piecesWeWantFromPeer.filter { index -> index < startIndex }.map { it -> it.toLong()  as Long}.toMutableList()
                     indexBiggerOrEqualThanIndex.addAll(indexSmallerThanIndex)
@@ -893,10 +895,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
 
             pieces = (torrent["info"] as Map<String, Any>)["pieces"] as ByteArray
             pieceLength = (torrent["info"] as Map<String, Any>)["piece length"] as Long
-            val zeroPadding = pieceLength * pieces.size / 20 - allfilesPieces.size
-            if (zeroPadding > 0) {
-                allfilesPieces += ByteArray(zeroPadding.toInt()) //padding with zero if there is content is to short
-            }
+
             return@thenApply pieces
         }.thenCompose { pieces ->
             database.piecesStatsRead(infohash)
@@ -904,11 +903,19 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                         var piecesStatsMap = immutablepiecesStatsMap.toMutableMap()
                         var allfilesPiecesIndex = 0
                         var indexMap =0
+                        var stopIterating =false
                         for (i in pieces.indices step 20){
-                            val valueToStoreInThatPieceStorage = allfilesPieces.copyOfRange(allfilesPiecesIndex,allfilesPiecesIndex+pieceLength.toInt())
+                            var endOfCopyRange = allfilesPiecesIndex+pieceLength.toInt()
+                            if (allfilesPiecesIndex+pieceLength.toInt() > allfilesPieces.size){
+                                endOfCopyRange = allfilesPieces.size
+                                stopIterating = true
+                            }
+                            val valueToStoreInThatPieceStorage = allfilesPieces.copyOfRange(allfilesPiecesIndex,endOfCopyRange)
                             allfilesPiecesIndex += pieceLength.toInt()
                             database.indexedPieceUpdate(infohash, indexMap.toLong(), valueToStoreInThatPieceStorage)
-                            piecesStatsMap[indexMap++.toLong()]?.isValid  = true
+                            piecesStatsMap[indexMap.toLong()]?.isValid  = true
+                            indexMap++
+                             if (stopIterating) break
                         }
             database.piecesStatsUpdate(infohash, piecesStatsMap)
             }
@@ -949,16 +956,17 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             val pieces = (torrent["info"] as Map<String, Any>)["pieces"] as ByteArray
             return@thenApply pieces
         }.thenCompose { pieces ->
-            val i = 0
+            var i = 0
             database.piecesStatsRead(infohash).thenApply { loadedPiecesMap ->
                 val mutableloadedPiecesMap = loadedPiecesMap.toMutableMap()
-                for (index in mutableloadedPiecesMap.keys) {
+                for (index in mutableloadedPiecesMap.keys.sorted()) {
                     database.indexedPieceRead(infohash,index).thenAccept { pieceContent->
-                        if (! sha1hash(pieceContent).equals(pieces.sliceArray(IntRange(i,i+19)))){
+                        if (! infohashToByteArray(sha1hash(pieceContent)).contentEquals(pieces.sliceArray(IntRange(i,i+19)))){
                             isAllPiecesOk = false
                             database.indexedPieceUpdate(infohash,index,ByteArray(0))
                             mutableloadedPiecesMap[index]!!.isValid = false
                         }
+                        i +=20
                     }.join() //TODO remove
                 }
                 database.piecesStatsUpdate(infohash,mutableloadedPiecesMap)

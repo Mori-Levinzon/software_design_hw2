@@ -90,7 +90,7 @@ class MockedCourseTorrentStaffTest {
         every { memoryDB.indexedPieceCreate(capture(key), capture(indexedKey), capture(indexPieceValue)) } answers {
             ImmediateFuture {
                 if(indexedPieceStorage.containsKey(key.captured+indexedKey.captured.toString())) throw IllegalStateException()
-                indexedPieceStorage[key.captured+indexedKey.captured.toString()] = ByteArray(0)
+                indexedPieceStorage[key.captured+indexedKey.captured.toString()] = indexPieceValue.captured
                 Unit
             }
         }
@@ -143,7 +143,7 @@ class MockedCourseTorrentStaffTest {
         every { memoryDB.indexedPieceUpdate(capture(key), capture(indexedKey), capture(indexPieceValue)) } answers {
             ImmediateFuture {
                 if(!indexedPieceStorage.containsKey(key.captured+indexedKey.captured.toString())) throw IllegalArgumentException()
-                indexedPieceStorage[key.captured+indexedKey.captured.toString()] = Ben.encodeStr(statsValue.captured).toByteArray()
+                indexedPieceStorage[key.captured+indexedKey.captured.toString()] = indexPieceValue.captured
                 Unit
             }
         }
@@ -368,11 +368,11 @@ class MockedCourseTorrentStaffTest {
     fun `lame torrent is loaded, file data is loaded, and recheck returns true`() {
         val infohash = torrent.load(lame).get()
 
-         torrent.loadFiles(
+        val done = torrent.loadFiles(
                 infohash,
                 mapOf("lame.exe" to lameExe.readBytes(), "lame_enc.dll" to lameEnc.readBytes())
-        ).get()
-        val done =         torrent.recheck(infohash).get()
+        )
+                .thenCompose { torrent.recheck(infohash) }.get()
 
         Assertions.assertTrue(done)
     }
