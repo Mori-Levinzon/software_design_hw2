@@ -10,6 +10,8 @@ import com.google.inject.Guice
 import com.natpryce.hamkrest.*
 import com.natpryce.hamkrest.assertion.assertThat
 import dev.misfitlabs.kotlinguice4.getInstance
+import il.ac.technion.cs.softwaredesign.Utils.Companion.toMap
+import il.ac.technion.cs.softwaredesign.Utils.Companion.toPieceIndexStats
 import io.mockk.*
 import org.junit.jupiter.api.*
 import java.lang.IllegalArgumentException
@@ -47,6 +49,7 @@ class MockedCourseTorrentStaffTest {
         var torrentsValue = slot<Map<String, Any>>()
         var piecesStatsValue = slot<Map<Long, PieceIndexStats>>()
         var indexPieceValue = slot<ByteArray>()
+        var numOfPieces = slot<Long>()
 
 
         every { memoryDB.announcesCreate(capture(key), capture(announcesValue)) } answers {
@@ -80,14 +83,23 @@ class MockedCourseTorrentStaffTest {
         every { memoryDB.piecesStatsCreate(capture(key), capture(piecesStatsValue)) } answers {
             ImmediateFuture {
                 if(piecesStatsStorage.containsKey(key.captured)) throw IllegalStateException()
-                piecesStatsStorage[key.captured] = Ben.encodeStr(piecesStatsValue.captured).toByteArray()
+                piecesStatsStorage[key.captured] = Ben.encodeStr(piecesStatsValue.captured.mapValues { pair -> pair.value.toMap() }).toByteArray()
                 Unit
             }
         }
         every { memoryDB.indexedPieceCreate(capture(key), capture(indexedKey), capture(indexPieceValue)) } answers {
             ImmediateFuture {
                 if(indexedPieceStorage.containsKey(key.captured+indexedKey.captured.toString())) throw IllegalStateException()
-                indexedPieceStorage[key.captured+indexedKey.captured.toString()] = Ben.encodeStr(piecesStatsValue.captured).toByteArray()
+                indexedPieceStorage[key.captured+indexedKey.captured.toString()] = ByteArray(0)
+                Unit
+            }
+        }
+        every { memoryDB.allpiecesCreate(capture(key), capture(numOfPieces)) } answers {
+            ImmediateFuture {
+                for (i in 0 until numOfPieces.captured) {
+                    if(indexedPieceStorage.containsKey(key.captured+i.toString())) throw IllegalStateException()
+                    indexedPieceStorage[key.captured+i.toString()] = ByteArray(0)
+                }
                 Unit
             }
         }
@@ -124,7 +136,7 @@ class MockedCourseTorrentStaffTest {
         every { memoryDB.piecesStatsUpdate(capture(key), capture(piecesStatsValue)) } answers {
             ImmediateFuture {
                 if(!piecesStatsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-                piecesStatsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
+                piecesStatsStorage[key.captured] = Ben.encodeStr(piecesStatsValue.captured.mapValues { it.value.toMap() }).toByteArray()
                 Unit
             }
         }
@@ -163,7 +175,8 @@ class MockedCourseTorrentStaffTest {
         every { memoryDB.piecesStatsRead(capture(key)) } answers {
             ImmediateFuture {
                 if(!piecesStatsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-                Ben(piecesStatsStorage[key.captured] as ByteArray).decode() as? Map<Long, PieceIndexStats> ?: throw IllegalArgumentException()
+                (Ben(piecesStatsStorage[key.captured] as ByteArray).decode() as? Map<Long, Map<String, PieceIndexStats>>)?.
+                mapValues { it -> it.value.toPieceIndexStats() }  ?: throw IllegalArgumentException()
             }
         }
         every { memoryDB.indexedPieceRead(capture(key),capture(indexedKey)) } answers {
@@ -205,11 +218,11 @@ class MockedCourseTorrentStaffTest {
         }
         every { memoryDB.indexedPieceDelete(capture(key),capture(indexedKey)) } answers {
             ImmediateFuture {
-                piecesStatsStorage.remove(key.captured+indexedKey.captured.toString()) ?: throw IllegalArgumentException()
+                indexedPieceStorage.remove(key.captured+indexedKey.captured.toString()) ?: throw IllegalArgumentException()
                 Unit
             }
         }
-        every { memoryDB.indexedPieceDelete(capture(key),capture(indexedKey)) } answers {
+        every { memoryDB.allpiecesDelete(capture(key),capture(indexedKey)) } answers {
             ImmediateFuture {
                 indexedPieceStorage.clear()
                 Unit

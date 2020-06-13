@@ -7,6 +7,7 @@ import il.ac.technion.cs.softwaredesign.storage.SecureStorage
 import il.ac.technion.cs.softwaredesign.storage.SecureStorageFactory
 import java.lang.IllegalStateException
 import java.nio.charset.Charset
+import java.time.Duration
 import java.util.concurrent.CompletableFuture
 
 /**
@@ -37,11 +38,20 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     fun trackersStatsCreate(key: String, value: Map<String, Map<String, Any>>) : CompletableFuture<Unit> {
         return trackersStatsStorage.thenCompose { create(it, key, Ben.encodeStr(value).toByteArray())}
     }
-    fun piecesStatsCreate(key: String, value: Map<Long, PieceIndexStats>) : CompletableFuture<Unit> {
-        return piecesStatsStorage.thenCompose { create(it, key, Ben.encodeStr(value.mapValues { pair -> pair.value.toMap() }).toByteArray())}
+    fun piecesStatsCreate(key: String, piecesMap: Map<Long,PieceIndexStats>) : CompletableFuture<Unit> {
+        return piecesStatsStorage.thenCompose { create(it, key, Ben.encodeStr(piecesMap.mapValues { pair -> pair.value.toMap() }).toByteArray())}
+//        return piecesStatsStorage.thenCompose { create(it, key, Ben.encodeStr(piecesMap).toByteArray())}
     }
     fun indexedPieceCreate(infohash: String, index: Long, value: ByteArray) : CompletableFuture<Unit> {//this one is rather Unnecessary since we can create a database each time we update a piece
-        return storage.open((infohash+index).toByteArray(charset)).thenCompose{ create(it, (infohash+index), Ben.encodeStr(value).toByteArray())}
+        return storage.open((infohash+index).toByteArray(charset)).thenCompose{ create(it, (infohash+index), value)}
+    }
+
+    fun allpiecesCreate(infohash: String, piecesSize: Long) : CompletableFuture<Unit> {
+        return CompletableFuture.supplyAsync {
+            for (i in 0 until piecesSize){
+                indexedPieceCreate(infohash,i, ByteArray(0))
+            }
+        }
     }
 
     fun torrentsRead(key: String) : CompletableFuture<Map<String, Any>> {
