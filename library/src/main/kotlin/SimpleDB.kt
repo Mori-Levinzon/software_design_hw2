@@ -43,7 +43,7 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
 //        return piecesStatsStorage.thenCompose { create(it, key, Ben.encodeStr(piecesMap).toByteArray())}
     }
     fun indexedPieceCreate(infohash: String, index: Long, value: ByteArray) : CompletableFuture<Unit> {//this one is rather Unnecessary since we can create a database each time we update a piece
-        return storage.open((infohash+index).toByteArray(charset)).thenCompose{ create(it, (infohash+index), value)}
+        return storage.open((infohash+index.toString()).toByteArray(charset)).thenCompose{ create(it, (infohash+index.toString()), value)}
     }
 
     fun allpiecesCreate(infohash: String, piecesSize: Long) : CompletableFuture<Unit> {
@@ -153,7 +153,7 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     fun allpiecesDelete(infohash: String, piecesSize: Long) : CompletableFuture<Unit> {
         return CompletableFuture.supplyAsync {
             for (i in 0..piecesSize){
-                storage.open((infohash+i).toByteArray(charset))
+                storage.open((infohash+i.toString()).toByteArray(charset))
                         .thenApply { delete(it, infohash+i.toString()) }
             }
         }

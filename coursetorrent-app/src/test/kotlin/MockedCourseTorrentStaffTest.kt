@@ -368,11 +368,11 @@ class MockedCourseTorrentStaffTest {
     fun `lame torrent is loaded, file data is loaded, and recheck returns true`() {
         val infohash = torrent.load(lame).get()
 
-        val done = torrent.loadFiles(
+         torrent.loadFiles(
                 infohash,
                 mapOf("lame.exe" to lameExe.readBytes(), "lame_enc.dll" to lameEnc.readBytes())
-        )
-                .thenCompose { torrent.recheck(infohash) }.get()
+        ).get()
+        val done =         torrent.recheck(infohash).get()
 
         Assertions.assertTrue(done)
     }

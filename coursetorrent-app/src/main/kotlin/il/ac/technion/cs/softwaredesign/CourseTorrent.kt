@@ -61,9 +61,10 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                         piecesMap[i.toLong()] = PieceIndexStats(0,0,0,0,false, Duration.ZERO, Duration.ZERO)
                     }
                     database.piecesStatsCreate(infohash, piecesMap.toMap() )
+//                    database.piecesStatsCreate(infohash, mapOf() )
 
                     database.torrentsCreate(infohash, Ben(torrent).decode() as Map<String, Any>)
-//                    database.allpiecesCreate(infohash, numOfPieces.toLong())
+                    database.allpiecesCreate(infohash, numOfPieces.toLong())
                     //TODO make database for each piece
                 }catch (e: IllegalStateException) {
                     e.printStackTrace()
@@ -82,20 +83,22 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @throws IllegalArgumentException If [infohash] is not loaded.
      */
     fun unload(infohash: String): CompletableFuture<Unit> {
-        return database.announcesDelete(infohash).thenApply {
+        return database.torrentsRead(infohash).thenApply {torrent ->
+                    val numOfPieces = ((torrent["info"] as Map<String,Any>)["pieces"] as ByteArray).size /20
+                    database.allpiecesDelete(infohash,numOfPieces.toLong())//TODO: create a read for the number of pieces that thier DB need to be destroyed
+                }.thenApply {
             try {
+                database.announcesDelete(infohash)
                 this.connectedPeers.remove(infohash)
                 database.peersDelete(infohash)
                 database.trackersStatsDelete(infohash)
                 database.piecesStatsDelete(infohash)
-//                database.allpiecesDelete(infohash)//TODO: create a read for the number of pieces that thier DB need to be destroyed
                 database.torrentsDelete(infohash)
-            }catch (e: Exception) {
+            } catch (e: Exception) {
                 throw IllegalArgumentException("Infohash doesn't exist")
             }
             Unit
         }
-
     }
 
     /**
@@ -297,8 +300,10 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         var shareRatio:Double = 0.0
         var leechTime:Duration = Duration.ZERO
         var seedTime:Duration = Duration.ZERO
-        return database.torrentsRead(infohash).thenApply { torrent ->
-            database.piecesStatsRead(infohash).thenApply { pieceMap ->
+        var torrent:MutableMap<String, Any> = mutableMapOf()
+        return database.torrentsRead(infohash).thenCompose { it ->
+            torrent = it.toMutableMap()
+            database.piecesStatsRead(infohash)}.thenApply { pieceMap ->
                 for ((index, pieceIndexStats) in pieceMap) {
                     uploaded += pieceIndexStats.uploaded
                     downloaded += pieceIndexStats.downloaded
@@ -314,7 +319,6 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 } else {
                     shareRatio = uploaded.toDouble() / downloaded.toDouble()
                 }
-            }
             pieces = ((torrent["info"] as Map<String, Any>)["pieces"] as ByteArray).size.toLong() / 20 //pieces is a string build from 20 byte sha1(piece) * #pieces
             return@thenApply TorrentStats(uploaded, downloaded, left, wasted, shareRatio, pieces, havePieces, leechTime, seedTime)
         }
@@ -839,7 +843,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         val res = mutableMapOf<String, ByteArray>()
         return database.piecesStatsRead(infohash).thenApply {
             val piecesStatsThatAlreadyBeenDownloadedMap= it.toMutableMap()
-            val indexesWeHave =piecesStatsThatAlreadyBeenDownloadedMap.map { it -> it.key }
+            val indexesWeHave =piecesStatsThatAlreadyBeenDownloadedMap.filter{ it -> it.value.isValid }.map { it -> it.key }
             database.torrentsRead(infohash).thenApply {
                 //val pieces = it["pieces"] as String
                 val piecelength = ((it["info"] as Map<String, Any>)["piece length"] as Long)
