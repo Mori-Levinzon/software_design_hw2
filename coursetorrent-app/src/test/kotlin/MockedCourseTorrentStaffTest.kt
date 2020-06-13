@@ -34,7 +34,7 @@ class MockedCourseTorrentStaffTest {
     private var trackerStatsStorage = HashMap<String, ByteArray>()
     private var announcesStorage = HashMap<String, ByteArray>()
     private var piecesStatsStorage = HashMap<String, ByteArray>()
-    private var indexedPieceStorage = HashMap<String, ByteArray>()//TODO: not really like this
+    private var indexedPieceStorage = HashMap<String, ByteArray>()
 
     private val lameExe = this::class.java.getResource("/lame.exe")
     private val lameEnc = this::class.java.getResource("/lame_enc.dll")
@@ -98,7 +98,7 @@ class MockedCourseTorrentStaffTest {
             ImmediateFuture {
                 for (i in 0 until numOfPieces.captured) {
                     if(indexedPieceStorage.containsKey(key.captured+i.toString())) throw IllegalStateException()
-                    indexedPieceStorage[key.captured+i.toString()] = ByteArray(0)
+                    indexedPieceStorage[key.captured+i.toString()] = byteArrayOf(0)
                 }
                 Unit
             }

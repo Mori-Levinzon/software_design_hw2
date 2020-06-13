@@ -21,7 +21,7 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     private val announcesStorage : CompletableFuture<SecureStorage> = storageFactory.open("announces".toByteArray(charset))
     private val peersStorage : CompletableFuture<SecureStorage> = storageFactory.open("peers".toByteArray(charset))
     private val trackersStatsStorage : CompletableFuture<SecureStorage> = storageFactory.open("trackersStats".toByteArray(charset))
-    private val piecesStatsStorage : CompletableFuture<SecureStorage> = storageFactory.open("piecesStats".toByteArray(charset))//TODO: find better names
+    private val piecesStatsStorage : CompletableFuture<SecureStorage> = storageFactory.open("piecesStats".toByteArray(charset))
     private val piecesStorage : CompletableFuture<SecureStorage> = storageFactory.open("pieces".toByteArray(charset))
     private val storage : SecureStorageFactory = storageFactory
 
@@ -49,7 +49,7 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     fun allpiecesCreate(infohash: String, piecesSize: Long) : CompletableFuture<Unit> {
         return CompletableFuture.supplyAsync {
             for (i in 0 until piecesSize){
-                indexedPieceCreate(infohash,i, ByteArray(0))
+                indexedPieceCreate(infohash,i, byteArrayOf(0))
             }
         }
     }

@@ -725,17 +725,25 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     }?.getOrNull(0) ?: throw java.lang.IllegalArgumentException("infohash or peer invalid")
                     if (connectedPeer.connectedPeer.peerChoking) throw IllegalArgumentException("peer choked the client")
 
+                    val startTime = System.currentTimeMillis()
 
                     while (checkForPeerPieceRequest(connectedPeer, selectedPieceBlock)){
                         sendPieceMessage(info, selectedPieceBlock, pieceIndex, connectedPeer)
 
                         sleep (100)
                     }
+                    val elapsedTime = System.currentTimeMillis() - startTime
+
+                    database.piecesStatsRead(infohash).thenApply { piecesMap ->
+                        var torrentStats = piecesMap.toMutableMap()
+                        var pieceStats  = torrentStats[pieceIndex]!!
+                        pieceStats.uploaded = pieceStats.uploaded + (selectedPieceBlock.size)
+                        pieceStats.leechTime = pieceStats.leechTime.plusMinutes(elapsedTime)
+                        torrentStats[pieceIndex] = pieceStats
+                    }
 
                 }
-            val zero =0
-
-
+            Unit
         }
     }
 
