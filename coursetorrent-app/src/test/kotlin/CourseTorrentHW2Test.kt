@@ -269,15 +269,15 @@ class CourseTorrentHW2Test {
 
         val stats = torrent.torrentStats(infohash).join()
 
-        assertThat(stats.havePieces,equalTo(0))
-        assertThat(stats.pieces, equalTo(165))
+        assert(stats.havePieces.toInt() ==0)
+        assertThat(stats.pieces.toInt(), equalTo(165))
 
         torrent.loadFiles(
                 infohash,
                 mapOf("lame.exe" to "wrong data".toByteArray(), "lame_enc.dll" to "wrongest data".toByteArray())
         ).join()
 
-        assertThat(stats.havePieces,equalTo(165))
+        assertThat(stats.havePieces.toInt(),equalTo(165))
     }
 
     @Test
@@ -286,17 +286,17 @@ class CourseTorrentHW2Test {
 
         val stats = torrent.torrentStats(infohash).join()
 
-        assertThat(stats.havePieces,equalTo(0))
-        assertThat(stats.pieces, equalTo(165))
+        assertThat(stats.havePieces.toInt(),equalTo(0))
+        assertThat(stats.pieces.toInt(), equalTo(165))
 
-        val secondPeer = TODO("COMPLETE ME")
+        val secondPeer =KnownPeer("",0,null)// TODO("COMPLETE ME")
         torrent.requestPiece(infohash,secondPeer,1)
         .join()
-        val firstpieceSize = TODO("COMPLETE ME")
+        val firstpieceSize: Long =1 //TODO("COMPLETE ME")
         assertThat(stats.downloaded,equalTo(firstpieceSize))
 
         torrent.sendPiece(infohash,secondPeer,2)
-        val secondPieceSize = TODO("COMPLETE ME")
+        val secondPieceSize :Long=2// TODO("COMPLETE ME")
 
         assertThat(stats.uploaded,equalTo(secondPieceSize))
 
