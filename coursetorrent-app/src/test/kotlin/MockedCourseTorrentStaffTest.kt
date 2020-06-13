@@ -83,7 +83,7 @@ class MockedCourseTorrentStaffTest {
         every { memoryDB.piecesStatsCreate(capture(key), capture(piecesStatsValue)) } answers {
             ImmediateFuture {
                 if(piecesStatsStorage.containsKey(key.captured)) throw IllegalStateException()
-                piecesStatsStorage[key.captured] = Ben.encodeStr(piecesStatsValue.captured.mapValues { pair -> pair.value.toMap() }).toByteArray()
+                piecesStatsStorage[key.captured] = Ben.encodeStr(piecesStatsValue.captured.mapValues { pair -> pair.value.toMap() }.mapKeys { it.key.toString() }).toByteArray()
                 Unit
             }
         }
@@ -136,7 +136,7 @@ class MockedCourseTorrentStaffTest {
         every { memoryDB.piecesStatsUpdate(capture(key), capture(piecesStatsValue)) } answers {
             ImmediateFuture {
                 if(!piecesStatsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-                piecesStatsStorage[key.captured] = Ben.encodeStr(piecesStatsValue.captured.mapValues { it.value.toMap() }).toByteArray()
+                piecesStatsStorage[key.captured] = Ben.encodeStr(piecesStatsValue.captured.mapValues { it.value.toMap() }.mapKeys { it.key.toString() }).toByteArray()
                 Unit
             }
         }
@@ -175,8 +175,8 @@ class MockedCourseTorrentStaffTest {
         every { memoryDB.piecesStatsRead(capture(key)) } answers {
             ImmediateFuture {
                 if(!piecesStatsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-                (Ben(piecesStatsStorage[key.captured] as ByteArray).decode() as? Map<Long, Map<String, PieceIndexStats>>)?.
-                mapValues { it -> it.value.toPieceIndexStats() }  ?: throw IllegalArgumentException()
+                (Ben(piecesStatsStorage[key.captured] as ByteArray).decode() as? Map<String, Map<String, Any>>)?.
+                mapValues { it -> it.value.toPieceIndexStats() }?.mapKeys { it.key.toLong() }  ?: throw IllegalArgumentException()
             }
         }
         every { memoryDB.indexedPieceRead(capture(key),capture(indexedKey)) } answers {

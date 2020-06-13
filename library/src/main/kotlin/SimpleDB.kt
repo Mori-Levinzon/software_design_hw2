@@ -39,7 +39,7 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
         return trackersStatsStorage.thenCompose { create(it, key, Ben.encodeStr(value).toByteArray())}
     }
     fun piecesStatsCreate(key: String, piecesMap: Map<Long,PieceIndexStats>) : CompletableFuture<Unit> {
-        return piecesStatsStorage.thenCompose { create(it, key, Ben.encodeStr(piecesMap.mapValues { pair -> pair.value.toMap() }).toByteArray())}
+        return piecesStatsStorage.thenCompose { create(it, key, Ben.encodeStr(piecesMap.mapValues { pair -> pair.value.toMap() }.mapKeys { it.key.toString() }).toByteArray())}
 //        return piecesStatsStorage.thenCompose { create(it, key, Ben.encodeStr(piecesMap).toByteArray())}
     }
     fun indexedPieceCreate(infohash: String, index: Long, value: ByteArray) : CompletableFuture<Unit> {//this one is rather Unnecessary since we can create a database each time we update a piece
@@ -94,8 +94,8 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
         return piecesStatsStorage.thenApply { read(it,key) }
                 .thenCompose { dbContent ->  dbContent }//to extract the value from the CompletableFuture
                 .thenApply {dbContent->
-                    (dbContent?.let { Ben(dbContent).decode() } as? Map<Long, Map<String, Any>>)?.
-                    mapValues { it.value.toPieceIndexStats() }
+                    (dbContent?.let { Ben(dbContent).decode() } as? Map<String, Map<String, Any>>)?.
+                    mapValues { it.value.toPieceIndexStats() }?.mapKeys { it.key.toLong() }
                             ?: throw IllegalStateException("Database contents disobey type rules")
                 }
     }
@@ -122,7 +122,7 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
         trackersStatsStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray())}
     }
     fun piecesStatsUpdate(key: String, value: Map<Long, PieceIndexStats>) : Unit {
-        piecesStatsStorage.thenApply {update(it, key, Ben.encodeStr(value.mapValues { it.value.toMap() }).toByteArray())}
+        piecesStatsStorage.thenApply {update(it, key, Ben.encodeStr(value.mapValues { it.value.toMap() }.mapKeys { it.key.toString() }).toByteArray())}
     }
 
     fun indexedPieceUpdate(infohash: String, index: Long, value: ByteArray) : Unit {
