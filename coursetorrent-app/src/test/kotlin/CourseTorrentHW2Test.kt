@@ -10,6 +10,7 @@ import com.google.inject.Guice
 import com.natpryce.hamkrest.*
 import com.natpryce.hamkrest.assertion.assertThat
 import dev.misfitlabs.kotlinguice4.getInstance
+import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import io.mockk.*
 import org.junit.jupiter.api.*
 import java.lang.IllegalArgumentException
@@ -21,6 +22,7 @@ import org.junit.jupiter.api.assertDoesNotThrow
 import org.junit.jupiter.api.assertThrows
 import java.net.ServerSocket
 import java.net.Socket
+import java.time.Duration
 import java.util.concurrent.CompletableFuture
 
 class CourseTorrentHW2Test {
@@ -252,20 +254,287 @@ class CourseTorrentHW2Test {
     }
 
     @Test
-    fun `after load, infohash calculated correctly`() {
-        val infohash = torrent.load(debian).get()
-
-        assertThat(infohash, equalTo("5a8062c076fa85e8056451c0d9aa04349ae27909"))
+    fun `torrentStats throws exception for the wrong infohash `() {
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.torrentStats("wrong infohash").get()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
     }
 
     @Test
-    fun `exceptions are thrown inside the CompletableFuture`() {
-        val future = assertDoesNotThrow { torrent.knownPeers("this is not a valid infohash") }
-        val throwable = assertThrows<CompletionException> { future.join() }
+    fun `torrentStats changed through the load calls`() {
+        val infohash = torrent.load(lame).get()
 
-        checkNotNull(throwable.cause)
+        val stats = torrent.torrentStats(infohash).join()
+
+        assertThat(stats.havePieces,equalTo(0))
+        assertThat(stats.pieces, equalTo(165))
+
+        torrent.loadFiles(
+                infohash,
+                mapOf("lame.exe" to "wrong data".toByteArray(), "lame_enc.dll" to "wrongest data".toByteArray())
+        ).join()
+
+        assertThat(stats.havePieces,equalTo(165))
+    }
+
+    @Test
+    fun `torrentStats changed through the requestPiece`() {
+        val infohash = torrent.load(lame).get()
+
+        val stats = torrent.torrentStats(infohash).join()
+
+        assertThat(stats.havePieces,equalTo(0))
+        assertThat(stats.pieces, equalTo(165))
+
+        val secondPeer = TODO("COMPLETE ME")
+        torrent.requestPiece(infohash,secondPeer,1)
+        .join()
+        val firstpieceSize = TODO("COMPLETE ME")
+        assertThat(stats.downloaded,equalTo(firstpieceSize))
+
+        torrent.sendPiece(infohash,secondPeer,2)
+        val secondPieceSize = TODO("COMPLETE ME")
+
+        assertThat(stats.uploaded,equalTo(secondPieceSize))
+
+    }
+
+    @Test
+    fun `start throws exception for listening twice  `() {
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose { torrent.start() }.get()
+            }
+        }
         assertThat(throwable.cause!!, isA<IllegalArgumentException>())
     }
+
+    @Test
+    fun `stop throws exception for calling without listening  `() {
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.stop().get()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+    }
+
+    @Test
+    fun `connect throws exception for wrong torrent and peer`() {
+        val infohash = torrent.load(lame).get()
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose {torrent.connect(infohash,KnownPeer("false",777,null))}.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+
+        val secondPeer = TODO("COMPLETE ME")
+        throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose {torrent.connect("wrong infohash",secondPeer)}.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+
+    }
+
+    @Test
+    fun `connect throws exception for bad connection`() {
+        val infohash = torrent.load(lame).get()
+        val secondPeer = TODO("COMPLETE ME")
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose { torrent.stop() }.thenCompose { torrent.connect(infohash,secondPeer) }.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<PeerConnectException>())
+    }
+
+    @Test
+    fun `disconnect throws exception for wrong torrent or  unconnected peer`() {
+        val infohash = torrent.load(lame).get()
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose {torrent.disconnect(infohash,KnownPeer("false",777,null))}.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+
+        val secondPeer = TODO("COMPLETE ME")
+        throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose {torrent.connect("wrong infohash",secondPeer)}.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+
+    }
+
+    @Test
+    fun `connectedPeers throws exception for the wrong infohash `() {
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.connectedPeers("wrong infohash").get()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+    }
+
+    @Test
+    fun `choke throws exception for the wrong infohash or unconnectedPeer`() {
+        val infohash = torrent.load(lame).get()
+        val unconnectedPeer = TODO("COMPLETE ME")
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose {torrent.choke(infohash,unconnectedPeer)}.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+
+        val secondPeer = TODO("COMPLETE ME")
+        throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose {torrent.choke("wrong infohash",secondPeer)}.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+    }
+
+    @Test
+    fun `unchoke throws exception for the wrong infohash or unconnectedPeer`() {
+        val infohash = torrent.load(lame).get()
+        val unconnectedPeer = TODO("COMPLETE ME")
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose {torrent.unchoke(infohash,unconnectedPeer)}.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+
+        val secondPeer = TODO("COMPLETE ME")
+        throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose {torrent.unchoke("wrong infohash",secondPeer)}.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+    }
+
+    @Test
+    fun `requestPiece throws exception for the wrong infohash or unconnectedPeer`() {
+        val infohash = torrent.load(lame).get()
+        val unconnectedPeer = TODO("COMPLETE ME")
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose {torrent.requestPiece(infohash,unconnectedPeer,0)}.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+
+        val secondPeer = TODO("COMPLETE ME")
+        throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose {torrent.requestPiece("wrong infohash",secondPeer,0)}.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+
+
+        throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose {torrent.requestPiece(infohash,secondPeer,190)}.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+    }
+
+    @Test
+    fun `sendPiece throws exception for the wrong infohash or unconnectedPeer`() {
+        val infohash = torrent.load(lame).get()
+        val unconnectedPeer = TODO("COMPLETE ME")
+        val requestedPiece: Long =1//TODO: create a piece request
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose {torrent.sendPiece(infohash,unconnectedPeer,0)}.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+
+        val secondPeer = TODO("COMPLETE ME")
+        throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose {torrent.sendPiece("wrong infohash",secondPeer,0)}.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+
+        val otherPieceThatWasNotRequested: Long = 2
+        throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.start().thenCompose {torrent.sendPiece(infohash,secondPeer,otherPieceThatWasNotRequested)}.join()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+
+    }
+
+    @Test
+    fun `availablePieces throws exception for the wrong infohash `() {
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.availablePieces("wrong infohash",165,0).get()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+    }
+
+    @Test
+    fun `requestedPieces throws exception for the wrong infohash `() {
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.requestedPieces("wrong infohash").get()
+            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+    }
+
+    @Test
+    fun `files throws exception for the wrong infohash `() {
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.files(
+                        "wrong infohash")
+                        .get()            }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+    }
+
+    @Test
+    fun `loadFiles throws exception for the wrong infohash `() {
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.loadFiles(
+                        "wrong infohash",
+                        mapOf("lame.exe" to "wrong data".toByteArray(), "lame_enc.dll" to "wrongest data".toByteArray())).get()                 }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+    }
+
+    @Test
+    fun `recheck throws exception for the wrong infohash `() {
+        val throwable = assertThrows<CompletionException> {
+            runWithTimeout(Duration.ofSeconds(10)){
+                torrent.recheck(
+                        "wrong infohash")
+                        .get()                  }
+        }
+        assertThat(throwable.cause!!, isA<IllegalArgumentException>())
+    }
+
 
     @Test
     fun `connects on command and initiates handshake`() {

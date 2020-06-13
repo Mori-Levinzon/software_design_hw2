@@ -304,6 +304,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     downloaded += pieceIndexStats.downloaded
                     left += pieceIndexStats.left
                     wasted += pieceIndexStats.wasted
+                    havePieces += if (pieceIndexStats.isValid) 1 else 0
                     leechTime += pieceIndexStats.leechTime
                     seedTime += pieceIndexStats.leechTime
                 }
@@ -314,7 +315,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     shareRatio = uploaded.toDouble() / downloaded.toDouble()
                 }
             }
-            havePieces = ((torrent["info"] as Map<String, Any>)["pieces"] as ByteArray).size.toLong() / 20 //pieces is a string build from 20 byte sha1(piece) * #pieces
+            pieces = ((torrent["info"] as Map<String, Any>)["pieces"] as ByteArray).size.toLong() / 20 //pieces is a string build from 20 byte sha1(piece) * #pieces
             return@thenApply TorrentStats(uploaded, downloaded, left, wasted, shareRatio, pieces, havePieces, leechTime, seedTime)
         }
     }
