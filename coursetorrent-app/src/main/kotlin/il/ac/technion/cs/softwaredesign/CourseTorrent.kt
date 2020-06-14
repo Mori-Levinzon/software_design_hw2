@@ -10,6 +10,7 @@ import il.ac.technion.cs.softwaredesign.exceptions.PeerChokedException
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import il.ac.technion.cs.softwaredesign.exceptions.PieceHashException
 import il.ac.technion.cs.softwaredesign.exceptions.TrackerException
+import java.lang.Math.ceil
 import java.lang.Thread.sleep
 import java.net.ServerSocket
 import java.net.Socket
@@ -17,6 +18,7 @@ import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
+import kotlin.experimental.or
 import kotlin.streams.toList
 
 
@@ -406,23 +408,19 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     throw PeerConnectException("Infohashes do not agree")
 
                 val newPeer = KnownPeer(peer.ip, peer.port, String(decodedHandshake.peerId))
-                addNewPeer(infohash, s, it, newPeer, peer)
+                Triple(s, it, newPeer)
             }
             catch (e: Exception) {
                 e.printStackTrace()
                 throw PeerConnectException("Peer connection failed")
             }
 
-
+        }.thenCompose { (s, it, newPeer) ->
+            addNewPeer(infohash, s, it, newPeer, peer)
         }
     }
 
-    private fun addNewPeer(infohash: String, s: Socket, kPeers : List<KnownPeer>, newPeer: KnownPeer, peerToRemove: KnownPeer?) {
-        //send bitfield message
-        //TODO If this torrent has anything downloaded, send a bitfield message.
-        //receive bitfield message
-        //Thread.sleep(100) //TODO maybe withTimeout instead of waiting
-        //TODO Wait 100ms, and in that time handle any bitfield or have messages that are received.
+    private fun addNewPeer(infohash: String, s: Socket, kPeers : List<KnownPeer>, newPeer: KnownPeer, peerToRemove: KnownPeer?) : CompletableFuture<Unit> {
         //update known peers with peer id
         val listKnownPeers = kPeers.toMutableList()
         if (peerToRemove != null) listKnownPeers.remove(peerToRemove)
@@ -437,10 +435,28 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         if(!this.connectedPeers.containsKey(infohash))
             this.connectedPeers[infohash] = mutableListOf()
 
-        this.connectedPeers[infohash]?.add(ConnectedPeerManager(
+        val connectedPeerMan = ConnectedPeerManager(
                 ConnectedPeer(newPeer, true, false, true, false,
                         0.0, 0.0),
-                s, listOf<Long>().toMutableList(), listOf<Long>().toMutableList()))
+                s, listOf<Long>().toMutableList(), listOf<Long>().toMutableList())
+        this.connectedPeers[infohash]?.add(connectedPeerMan)
+        //send bitfield message
+        return database.piecesStatsRead(infohash).thenApply { piecesMap ->
+            //If this torrent has anything downloaded, send a bitfield message.
+            val bitfield = ByteArray(ceil(piecesMap.size / 8.0).toInt(), { 0 })
+            val piecesWeHave = piecesMap.filter { it.value.isValid }.keys
+            if(piecesWeHave.isNotEmpty()) {
+                for (piece in piecesWeHave) {
+                    val bytePlace = Math.pow(2.toDouble(), 7 - (piece.toDouble() % 8)).toByte() //1, 2, 4, 8, 16, 32, 64, 128
+                    bitfield[piece.toInt() / 8] = bitfield[piece.toInt() / 8] or bytePlace
+                }
+                s.getOutputStream().write(WireProtocolEncoder.encode(5, bitfield))
+            }
+            //sleep 100 ms
+            Thread.sleep(100)
+            //receive bitfield or have messages
+            connectedPeerMan.handleIncomingMessages()
+        }
     }
 
     /**

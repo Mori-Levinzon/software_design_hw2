@@ -1,6 +1,7 @@
 package il.ac.technion.cs.softwaredesign
 
 import java.net.Socket
+import kotlin.experimental.and
 
 class ConnectedPeerManager(
         var connectedPeer: ConnectedPeer,
@@ -33,6 +34,19 @@ class ConnectedPeerManager(
                 4.toByte() -> { //have
                     val pieceIndex = WireProtocolDecoder.decode(message, 1).ints[0].toLong()
                     availablePieces.add(pieceIndex)
+                }
+                5.toByte() -> { //bitfield
+                    val bitfield = WireProtocolDecoder.decode(message, 0).contents
+                    var base = 0.toLong()
+                    for(byte in bitfield) {
+                        for(i in 0.until(8)) {
+                            val bytePlace = Math.pow(2.toDouble(), 7 - (i.toDouble() % 8)).toByte() //1, 2, 4, 8, 16, 32, 64, 128
+                            if(byte and bytePlace == bytePlace) {
+                                availablePieces.add(base + i)
+                            }
+                        }
+                        base += 8
+                    }
                 }
                 6.toByte() -> { //request
                     if(connectedPeer.amChoking) return
