@@ -18,6 +18,7 @@ import java.net.SocketTimeoutException
 import java.nio.ByteBuffer
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
 import kotlin.experimental.or
 import kotlin.streams.toList
 
@@ -54,8 +55,8 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             val infohash = torrentData.infohash
             database.announcesCreate(infohash, torrentData.announceList).thenApply {
                 try {
-                    database.peersCreate(infohash, listOf())
-                    database.trackersStatsCreate(infohash, mapOf())
+                    database.peersCreate(infohash, listOf()).join()
+                    database.trackersStatsCreate(infohash, mapOf()).join()
 
                     val metaInfo = Ben(torrent).decode() as Map<String, Any>
                     val numOfPieces = ((metaInfo["info"] as Map<String,Any>)["pieces"] as ByteArray).size /20
@@ -66,13 +67,12 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                         piecesMap[i.toLong()] = PieceIndexStats(0,0, pieceLength,0,false, Duration.ZERO, Duration.ZERO)
                     }
                     piecesMap[numOfPieces.toLong()-1] = PieceIndexStats(0,0, lastPieceLength,0,false, Duration.ZERO, Duration.ZERO)
-                    database.piecesStatsCreate(infohash, piecesMap.toMap() )
+                    database.piecesStatsCreate(infohash, piecesMap.toMap() ).join()
 //                    database.piecesStatsCreate(infohash, mapOf() )
 
-                    database.torrentsCreate(infohash, Ben(torrent).decode() as Map<String, Any>)
-                    database.allpiecesCreate(infohash, numOfPieces.toLong())
-                }catch (e: IllegalStateException) {
-                    e.printStackTrace()
+                    database.torrentsCreate(infohash, Ben(torrent).decode() as Map<String, Any>).join()
+                    database.allpiecesCreate(infohash, numOfPieces.toLong()).join()
+                }catch (e: CompletionException) {
                     throw IllegalStateException("Same infohash already loaded")
                 }
                 infohash
@@ -90,15 +90,15 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
     fun unload(infohash: String): CompletableFuture<Unit> {
         return database.torrentsRead(infohash).thenApply {torrent ->
                     val numOfPieces = ((torrent["info"] as Map<String,Any>)["pieces"] as ByteArray).size /20
-                    database.allpiecesDelete(infohash,numOfPieces.toLong())
+                    database.allpiecesDelete(infohash,numOfPieces.toLong()).join()
                 }.thenApply {
             try {
-                database.announcesDelete(infohash)
+                database.announcesDelete(infohash).join()
                 this.connectedPeers.remove(infohash)
-                database.peersDelete(infohash)
-                database.trackersStatsDelete(infohash)
-                database.piecesStatsDelete(infohash)
-                database.torrentsDelete(infohash)
+                database.peersDelete(infohash).join()
+                database.trackersStatsDelete(infohash).join()
+                database.piecesStatsDelete(infohash).join()
+                database.torrentsDelete(infohash).join()
             } catch (e: Exception) {
                 throw IllegalArgumentException("Infohash doesn't exist")
             }
@@ -204,9 +204,8 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             val torrentFile = TorrentFile(infohash, itList)//throws IllegalArgumentException
             torrentFile.scrapeTrackers(database)?.thenApply { torrentAllStats->
                 database.trackersStatsUpdate(infohash, torrentAllStats)
-            }
-            val zero =0
-            //update the current stats of the torrent file in the stats db
+            }?.join()
+            Unit
         }
     }
 
@@ -361,8 +360,9 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         return CompletableFuture.supplyAsync {
             if(this.serverSocket == null) throw java.lang.IllegalStateException("Not listening")
             this.connectedPeers.forEach { (infohash, peers) ->
-                peers.forEach { this.disconnect(infohash, it.connectedPeer.knownPeer) }
+                peers.forEach { this.internalDisconnect(infohash, it.connectedPeer.knownPeer) }
             }
+            this.connectedPeers.clear()
             this.serverSocket?.close()
             this.serverSocket = null
         }
@@ -413,7 +413,6 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 Triple(s, it, newPeer)
             }
             catch (e: Exception) {
-                e.printStackTrace()
                 throw PeerConnectException("Peer connection failed")
             }
 
@@ -484,10 +483,21 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             val connectedPeer = this.connectedPeers[infohash]?.filter {
                 connectedPeer -> connectedPeer.connectedPeer.knownPeer == peer
             }?.getOrNull(0) ?: throw java.lang.IllegalArgumentException("infohash or peer invalid")
-            connectedPeer.socket.close()
+            internalDisconnect(infohash, peer)
             this.connectedPeers[infohash]?.remove(connectedPeer)
             if(this.connectedPeers[infohash]?.isEmpty() ?: false) this.connectedPeers.remove(infohash)
         }
+    }
+
+    /**
+     * Disconnect from [peer] by closing the connection, but does not remove the peer from connectedPeers
+     * @throws IllegalArgumentException if [infohash] is not loaded or [peer] is not connected.
+     */
+    private fun internalDisconnect(infohash: String, peer: KnownPeer) {
+        val connectedPeer = this.connectedPeers[infohash]?.filter {
+            connectedPeer -> connectedPeer.connectedPeer.knownPeer == peer
+        }?.getOrNull(0) ?: throw java.lang.IllegalArgumentException("infohash or peer invalid")
+        connectedPeer.socket.close()
     }
 
     /**
@@ -622,10 +632,10 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                                     String(decodedHandshake.peerId))
                             socket.getOutputStream().write(WireProtocolEncoder.handshake(decodedHandshake.infohash,
                                     this.getPeerID().toByteArray()))
-                            addNewPeer(newInfohash, socket, it, newPeer, null)
+                            addNewPeer(newInfohash, socket, it, newPeer, null).join()
                         }
                         newPeerAcceptor()
-                    }
+                    }.join()
                 }
             }
             newPeerAcceptor()
@@ -645,7 +655,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 database.piecesStatsRead(infohash).thenApply { piecesStatsWeHaveMap ->
                     val piecesWeHaveThatNotDamaged = piecesStatsWeHaveMap.filter { it -> it.value.isValid == true }
                     lst.forEach { peerManager -> peerManager.decideIfInterested(piecesWeHaveThatNotDamaged) }
-                }
+                }.join()
             }
         }
     }
@@ -719,10 +729,9 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                         database.piecesStatsUpdate(infohash, updatedTorrentStats)
                         database.indexedPieceUpdate(infohash,pieceIndex, peerMessage.block)
 
-                    }
+                    }.join()
                 }
                 catch (e: Exception) {
-                    e.printStackTrace()
                     throw PeerConnectException("Peer connection failed")
                 }
             Unit
@@ -856,7 +865,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                             torrentStats
                         }.thenApply {
                             database.piecesStatsUpdate(infohash,it)
-                        }
+                        }.join()
                     }
 
                 }
@@ -1006,7 +1015,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     }
                     fileOffset += fileLength.toInt()
                 }
-            }
+            }.join()
             res
         }
     }
@@ -1142,13 +1151,13 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @param  newPeers : list of the peers to be added connected peers
      *
      */
-    private fun addToPeers(infohash : String, newPeers : List<Map<String, String>>) : CompletableFuture<Unit>{
+    private fun addToPeers(infohash : String, newPeers : List<Map<String, String>>) {
 
-        return database.peersRead(infohash).thenApply() { it ->
+        database.peersRead(infohash).thenApply() { it ->
             val currPeers = it.toSet().toMutableSet()
             currPeers.addAll(newPeers) //Matan said that peers with same IP, same port, but different peer id will not be tested
             database.peersUpdate(infohash, currPeers.toList())
-        }
+        }.join()
     }
 
     /**
