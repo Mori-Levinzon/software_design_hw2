@@ -624,10 +624,10 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         return database.torrentsRead(infohash).thenApply {torrent->
                 torrent ?: throw IllegalArgumentException("torrent does not exist")
                 val info = torrent["info"] as Map<String, Any>
-                val pieces = info?.get("pieces") as String
+                val pieces = info?.get("pieces") as ByteArray
 
                 //20 byte for each piece
-                val piecesLen = pieces.length/20
+                val piecesLen = pieces.size/20
                 if (pieceIndex >= piecesLen) throw java.lang.IllegalArgumentException("wrongs piece index")
 
                 val connectedPeer = this.connectedPeers[infohash]?.filter {
@@ -650,10 +650,10 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     }
 
                     val elapsedTime = System.currentTimeMillis() - startTime
-
                     if (peerMessage.index != pieceIndex ||
                             peerMessage.begin != expectedBlockBeginOffset ||
-                            sha1hash(peerMessage.block) != pieces[pieceIndex.toInt()].toString()) throw PieceHashException("piece does not match the hash from the meta-info file")
+                            ! infohashToByteArray(sha1hash(peerMessage.block)).contentEquals(pieces.sliceArray(IntRange((pieceIndex*20).toInt(),(pieceIndex*20).toInt()+19))) )
+                        throw PieceHashException("piece does not match the hash from the meta-info file")
 
                     //update the stats db
                     database.piecesStatsRead(infohash).thenApply { immutabletorrentStats->

@@ -10,6 +10,8 @@ import com.google.inject.Guice
 import com.natpryce.hamkrest.*
 import com.natpryce.hamkrest.assertion.assertThat
 import dev.misfitlabs.kotlinguice4.getInstance
+import il.ac.technion.cs.softwaredesign.Utils.Companion.toMap
+import il.ac.technion.cs.softwaredesign.Utils.Companion.toPieceIndexStats
 import il.ac.technion.cs.softwaredesign.exceptions.PeerConnectException
 import io.mockk.*
 import org.junit.jupiter.api.*
@@ -35,7 +37,7 @@ class CourseTorrentHW2Test {
     private var trackerStatsStorage = HashMap<String, ByteArray>()
     private var announcesStorage = HashMap<String, ByteArray>()
     private var piecesStatsStorage = HashMap<String, ByteArray>()
-    private var indexedPieceStorage = HashMap<String, ByteArray>()//TODO: not really like this
+    private var indexedPieceStorage = HashMap<String, ByteArray>()
 
     private val lameExe = this::class.java.getResource("/lame.exe")
     private val lameEnc = this::class.java.getResource("/lame_enc.dll")
@@ -50,6 +52,7 @@ class CourseTorrentHW2Test {
         var torrentsValue = slot<Map<String, Any>>()
         var piecesStatsValue = slot<Map<Long, PieceIndexStats>>()
         var indexPieceValue = slot<ByteArray>()
+        var numOfPieces = slot<Long>()
 
 
         every { memoryDB.announcesCreate(capture(key), capture(announcesValue)) } answers {
@@ -83,14 +86,23 @@ class CourseTorrentHW2Test {
         every { memoryDB.piecesStatsCreate(capture(key), capture(piecesStatsValue)) } answers {
             ImmediateFuture {
                 if(piecesStatsStorage.containsKey(key.captured)) throw IllegalStateException()
-                piecesStatsStorage[key.captured] = Ben.encodeStr(piecesStatsValue.captured).toByteArray()
+                piecesStatsStorage[key.captured] = Ben.encodeStr(piecesStatsValue.captured.mapValues { pair -> pair.value.toMap() }.mapKeys { it.key.toString() }).toByteArray()
                 Unit
             }
         }
         every { memoryDB.indexedPieceCreate(capture(key), capture(indexedKey), capture(indexPieceValue)) } answers {
             ImmediateFuture {
                 if(indexedPieceStorage.containsKey(key.captured+indexedKey.captured.toString())) throw IllegalStateException()
-                indexedPieceStorage[key.captured+indexedKey.captured.toString()] = Ben.encodeStr(piecesStatsValue.captured).toByteArray()
+                indexedPieceStorage[key.captured+indexedKey.captured.toString()] = indexPieceValue.captured
+                Unit
+            }
+        }
+        every { memoryDB.allpiecesCreate(capture(key), capture(numOfPieces)) } answers {
+            ImmediateFuture {
+                for (i in 0 until numOfPieces.captured) {
+                    if(indexedPieceStorage.containsKey(key.captured+i.toString())) throw IllegalStateException()
+                    indexedPieceStorage[key.captured+i.toString()] = byteArrayOf(0)
+                }
                 Unit
             }
         }
@@ -127,14 +139,14 @@ class CourseTorrentHW2Test {
         every { memoryDB.piecesStatsUpdate(capture(key), capture(piecesStatsValue)) } answers {
             ImmediateFuture {
                 if(!piecesStatsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-                piecesStatsStorage[key.captured] = Ben.encodeStr(statsValue.captured).toByteArray()
+                piecesStatsStorage[key.captured] = Ben.encodeStr(piecesStatsValue.captured.mapValues { it.value.toMap() }.mapKeys { it.key.toString() }).toByteArray()
                 Unit
             }
         }
         every { memoryDB.indexedPieceUpdate(capture(key), capture(indexedKey), capture(indexPieceValue)) } answers {
             ImmediateFuture {
                 if(!indexedPieceStorage.containsKey(key.captured+indexedKey.captured.toString())) throw IllegalArgumentException()
-                indexedPieceStorage[key.captured+indexedKey.captured.toString()] = Ben.encodeStr(statsValue.captured).toByteArray()
+                indexedPieceStorage[key.captured+indexedKey.captured.toString()] = indexPieceValue.captured
                 Unit
             }
         }
@@ -166,7 +178,8 @@ class CourseTorrentHW2Test {
         every { memoryDB.piecesStatsRead(capture(key)) } answers {
             ImmediateFuture {
                 if(!piecesStatsStorage.containsKey(key.captured)) throw IllegalArgumentException()
-                Ben(piecesStatsStorage[key.captured] as ByteArray).decode() as? Map<Long, PieceIndexStats> ?: throw IllegalArgumentException()
+                (Ben(piecesStatsStorage[key.captured] as ByteArray).decode() as? Map<String, Map<String, Any>>)?.
+                mapValues { it -> it.value.toPieceIndexStats() }?.mapKeys { it.key.toLong() }  ?: throw IllegalArgumentException()
             }
         }
         every { memoryDB.indexedPieceRead(capture(key),capture(indexedKey)) } answers {
@@ -208,11 +221,11 @@ class CourseTorrentHW2Test {
         }
         every { memoryDB.indexedPieceDelete(capture(key),capture(indexedKey)) } answers {
             ImmediateFuture {
-                piecesStatsStorage.remove(key.captured+indexedKey.captured.toString()) ?: throw IllegalArgumentException()
+                indexedPieceStorage.remove(key.captured+indexedKey.captured.toString()) ?: throw IllegalArgumentException()
                 Unit
             }
         }
-        every { memoryDB.indexedPieceDelete(capture(key),capture(indexedKey)) } answers {
+        every { memoryDB.allpiecesDelete(capture(key),capture(indexedKey)) } answers {
             ImmediateFuture {
                 indexedPieceStorage.clear()
                 Unit
@@ -534,6 +547,47 @@ class CourseTorrentHW2Test {
         }
         assertThat(throwable.cause!!, isA<IllegalArgumentException>())
     }
+
+    @Test
+    fun `requestPiece throws exception for the wrong infohash `() {
+
+        val infohash = torrent.load(lame).get()
+
+        val sock = initiateRemotePeer(infohash)
+
+        sock.outputStream.write(WireProtocolEncoder.encode(4, 0))
+        sock.outputStream.write(WireProtocolEncoder.encode(1)) //  unchoke peer
+        sock.outputStream.write(WireProtocolEncoder.encode(2)) //  interested peer
+//        sock.outputStream.write(WireProtocolEncoder.encode(7,0,0,block)) //  sent piece that request in the request piece
+        sock.outputStream.flush()
+
+        val pieces = assertDoesNotThrow {
+            torrent.handleSmallMessages().get()
+            torrent.availablePieces(infohash, 10, 0).get()
+        }
+
+
+        val knownPeers = torrent.knownPeers(infohash).get()
+        val connectedPeers = torrent.connectedPeers(infohash).thenAcceptAsync {
+            torrent.sendPiece(infohash,it[0].knownPeer,0).get()
+            torrent.requestPiece(infohash,it[0].knownPeer,0).get()
+            torrent.sendPiece(infohash,it[0].knownPeer,0).get()
+        }.get()
+
+        val stats = torrent.torrentStats(infohash)
+
+        //TODO: check torrent stats
+
+
+        torrent.stop().get()
+        sock.close()
+    }
+
+
+
+
+
+
 
 
     @Test
