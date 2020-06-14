@@ -7,7 +7,8 @@ class ConnectedPeerManager(
         var connectedPeer: ConnectedPeer,
         var socket: Socket,
         var availablePieces: MutableList<Long>,
-        var requestedPieces: MutableList<Long>
+        var requestedPieces: MutableList<Long>,
+        var requestedPiecesDetails: MutableMap<Long, PeerMessage>
 ) {
     /*
      * Messages to receive and handle from peers:
@@ -55,7 +56,7 @@ class ConnectedPeerManager(
                     val begin = decodedMessage.ints[1]
                     val length = decodedMessage.ints[2]
                     requestedPieces.add(index.toLong())
-                    //TODO what should I do with begin and length?
+                    requestedPiecesDetails[index.toLong()] = PeerMessage(index.toLong(), begin.toLong(), length.toLong(), ByteArray(0), -1)
                 }
             }
             message = message.sliceArray(IntRange(WireProtocolDecoder.length(message) + 4, message.size - 1))

@@ -550,8 +550,7 @@ class CourseTorrentHW2Test {
     }
 
     @Test
-    fun `requestPiece recieves a valid piece from peer`() {
-
+    fun `sendPiece sends a piece successfully`() {
         val infohash = torrent.load(lame).get()
 
         val sock = initiateRemotePeer(infohash)
@@ -563,6 +562,58 @@ class CourseTorrentHW2Test {
                 .thenCompose { torrent.recheck(infohash) }.get()
 
 
+        sock.outputStream.write(WireProtocolEncoder.encode(1)) //  unchoke peer
+        sock.outputStream.write(WireProtocolEncoder.encode(2)) //  interested peer
+        sock.outputStream.write(WireProtocolEncoder.encode(6, 0, 0, 16384))
+        sock.outputStream.flush()
+
+
+        val knownPeers = torrent.knownPeers(infohash).get()
+        val connectedPeers = torrent.connectedPeers(infohash).get()
+
+
+
+        val pieces = assertDoesNotThrow {
+            torrent.unchoke(infohash, knownPeers[0])
+            torrent.handleSmallMessages().get()
+            torrent.requestedPieces(infohash).get()
+        }
+        assert(pieces.size == 1)
+        assert(pieces.values.first().size == 1)
+
+        sock.getInputStream().readNBytes(5)
+
+        torrent.sendPiece(infohash,connectedPeers[0].knownPeer,0).get()
+
+        checkReceiveFirstPiece(infohash, sock)
+
+        val stats =torrent.torrentStats(infohash).get()
+
+
+        assertThat(stats.uploaded.toInt(), equalTo(indexedPieceStorage[infohash+0.toString()]?.size))
+
+        val pieces2 = assertDoesNotThrow {
+            torrent.requestedPieces(infohash).get()
+        }
+        assert(pieces2.size == 1)
+        assert(pieces2.values.first().size == 0)
+
+        torrent.stop().get()
+        sock.close()
+    }
+
+    private fun checkReceiveFirstPiece(infohash: String, sock: Socket) {
+        val message = sock.getInputStream().readNBytes(13 + 16384)
+        val decodedMessage = WireProtocolDecoder.decode(message, 2)
+        assert(decodedMessage.contents.contentEquals(indexedPieceStorage[infohash + 0.toString()]!!))
+    }
+
+    @Test
+    fun `requestPiece recieves a valid piece from peer`() {
+
+        val infohash = torrent.load(lame).get()
+
+        val sock = initiateRemotePeer(infohash)
 
         sock.outputStream.write(WireProtocolEncoder.encode(4, 0))
         sock.outputStream.write(WireProtocolEncoder.encode(1)) //  unchoke peer
@@ -579,22 +630,22 @@ class CourseTorrentHW2Test {
             torrent.handleSmallMessages().get()
             torrent.availablePieces(infohash, 10, 0).get()
         }
+        assert(pieces.size == 1)
+        assert(pieces.values.first().size == 1)
 
         val index: Long = sendPieceInTheStream(infohash, sock)
 
-
-
-//            torrent.sendPiece(infohash,connectedPeers[0].knownPeer,0)
         torrent.requestPiece(infohash,connectedPeers[0].knownPeer,0).get()
 
         val stats =torrent.torrentStats(infohash).get()
 
 
-//        val index=0
         assertThat(stats.downloaded.toInt(), equalTo(indexedPieceStorage[infohash+index.toString()]?.size))
-        assertThat(stats.uploaded.toInt(), equalTo(indexedPieceStorage[infohash+index.toString()]?.size))
 
-        //TODO: check torrent stats
+        var files = torrent.files(infohash).get()
+        assert (files.keys.size ==1 )
+        assert(files.values.first().sliceArray(IntRange(0, 16384 - 1)).contentEquals(indexedPieceStorage[infohash+index.toString()]!!.sliceArray(IntRange(0, 16384 - 1))))
+        assert(files.values.first().sliceArray(IntRange(16384 , 16384 + 100)).contentEquals(ByteArray(101, { 0 })))
 
 
         torrent.stop().get()
@@ -603,16 +654,17 @@ class CourseTorrentHW2Test {
 
     private fun sendPieceInTheStream(infohash: String, sock: Socket): Long {
         val index: Long = 0
-        val requestedPieceLength = indexedPieceStorage[infohash + index.toString()]?.size
-        val buffer = ByteBuffer.allocate(17)
-        buffer.putInt(9 + requestedPieceLength!!)
+        val piece = lameExe.readBytes().sliceArray(IntRange(0, 16384 - 1))
+        val requestedPieceLength = piece.size
+        val buffer = ByteBuffer.allocate(13+ requestedPieceLength!!)
+        buffer.putInt(9 + requestedPieceLength!!) //message length
         val msg_id = 7
-        buffer.put(msg_id.toByte())
-        buffer.putInt(index.toInt())
+        buffer.put(msg_id.toByte()) //message id
+        buffer.putInt(index.toInt()) //index
         // begin: integer specifying the zero-based byte offset within the piece. all the pieces except the last one are the same size so the calculation is #pices*pieceSize
         val blockbegin = (0 + index * requestedPieceLength).toInt()
-        buffer.putInt(blockbegin)
-        buffer.put(indexedPieceStorage[infohash + index.toString()])
+        buffer.putInt(blockbegin) //begin
+        buffer.put(piece)
         sock.getOutputStream().write(buffer.array())
         sock.outputStream.flush()
         return index

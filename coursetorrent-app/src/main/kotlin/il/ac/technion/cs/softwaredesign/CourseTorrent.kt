@@ -438,7 +438,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         val connectedPeerMan = ConnectedPeerManager(
                 ConnectedPeer(newPeer, true, false, true, false,
                         0.0, 0.0),
-                s, listOf<Long>().toMutableList(), listOf<Long>().toMutableList())
+                s, listOf<Long>().toMutableList(), listOf<Long>().toMutableList(), mutableMapOf())
         this.connectedPeers[infohash]?.add(connectedPeerMan)
         //send bitfield message
         return database.piecesStatsRead(infohash).thenApply { piecesMap ->
@@ -677,6 +677,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                         torrentStats
                     }.thenApply { updatedTorrentStats ->
                         database.piecesStatsUpdate(infohash, updatedTorrentStats)
+                        database.indexedPieceUpdate(infohash,pieceIndex, peerMessage.block)
                     }
                 }
                 catch (e: Exception) {
@@ -691,9 +692,8 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         var torrentStats = immutabletorrentStats.toMutableMap()
         var pieceStats = torrentStats[pieceIndex]!!
         pieceStats.downloaded = pieceStats.downloaded + (peerMessage.block.size)
-        pieceStats.wasted = pieceStats.wasted + (peerMessage.block.size)
         pieceStats.left = 0
-        pieceStats.seedTime = pieceStats.seedTime.plusMillis(elapsedTime)
+        pieceStats.leechTime = pieceStats.leechTime.plusMillis(elapsedTime)
         pieceStats.isValid = true
         torrentStats[pieceIndex] = pieceStats
         return torrentStats
@@ -701,14 +701,19 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
 
     private fun getPieceMessage(connectedPeer: ConnectedPeerManager, info: Map<String, Any>): PeerMessage {
         val inputStream = connectedPeer.socket.getInputStream()
-        var recievedPieceIndex = inputStream.read().toLong()
-        var recievedBlockBeginOffset = inputStream.read().toLong()
         //excpect for this length
-        val expectedPieceLength = info?.get("piece length") as Int ?: 16000
-        var recievedPieceBlock = ByteArray(expectedPieceLength)
-        //will fill less than this if less is sent
-        var messageResult = inputStream.read(recievedPieceBlock)
-        return  PeerMessage(recievedPieceIndex, recievedBlockBeginOffset, recievedPieceBlock.size.toLong(), recievedPieceBlock, messageResult)
+        val expectedPieceLength = info?.get("piece length") as Long ?: 16000
+        if (inputStream.available() < 13 + expectedPieceLength) {
+            return  PeerMessage(-1, -1, -1, byteArrayOf(0), -1)
+
+        }
+        val message = inputStream.readNBytes(13 + expectedPieceLength.toInt())
+        val messageDecoded = WireProtocolDecoder.decode(message, 2)
+        var recievedPieceIndex = messageDecoded.ints[0].toLong()
+        var recievedBlockBeginOffset = messageDecoded.ints[1].toLong()
+        //excpect for this length
+        var recievedPieceBlock = messageDecoded.contents
+        return  PeerMessage(recievedPieceIndex, recievedBlockBeginOffset, recievedPieceBlock.size.toLong(), recievedPieceBlock, 1)
     }
 
     private fun sendRequestMessage(info: Map<String, Any>?, pieceIndex: Long, connectedPeer: ConnectedPeerManager): Long{
@@ -760,19 +765,31 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
 
                     val startTime = System.currentTimeMillis()
 
-                    while (checkForPeerPieceRequest(connectedPeer, selectedPieceBlock)){
-                        sendPieceMessage(info, selectedPieceBlock, pieceIndex, connectedPeer)
+                    var sent = 0
 
+                    if (!connectedPeer.requestedPieces.contains(pieceIndex)){
                         sleep (100)
+                        connectedPeer.handleIncomingMessages()
                     }
-                    val elapsedTime = System.currentTimeMillis() - startTime
+                    while (connectedPeer.requestedPieces.contains(pieceIndex)){
+                        sent = sendPieceMessage(info, selectedPieceBlock, pieceIndex, connectedPeer)
+                        sleep (100)
+                        connectedPeer.handleIncomingMessages()
+                    }
 
-                    database.piecesStatsRead(infohash).thenApply { piecesMap ->
-                        var torrentStats = piecesMap.toMutableMap()
-                        var pieceStats  = torrentStats[pieceIndex]!!
-                        pieceStats.uploaded = pieceStats.uploaded + (selectedPieceBlock.size)
-                        pieceStats.leechTime = pieceStats.leechTime.plusMinutes(elapsedTime)
-                        torrentStats[pieceIndex] = pieceStats
+                    if (sent > 0) {
+                        val elapsedTime = System.currentTimeMillis() - startTime
+
+                        database.piecesStatsRead(infohash).thenApply { piecesMap ->
+                            var torrentStats = piecesMap.toMutableMap()
+                            var pieceStats  = torrentStats[pieceIndex]!!
+                            pieceStats.uploaded = pieceStats.uploaded + sent
+                            pieceStats.seedTime = pieceStats.seedTime.plusMinutes(elapsedTime)
+                            torrentStats[pieceIndex] = pieceStats
+                            torrentStats
+                        }.thenApply {
+                            database.piecesStatsUpdate(infohash,it)
+                        }
                     }
 
                 }
@@ -780,33 +797,23 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         }
     }
 
-    private fun sendPieceMessage(info: Map<String, Any>, selectedPieceBlock: ByteArray, pieceIndex: Long, connectedPeer: ConnectedPeerManager) {
-        val requestedPieceLength = info?.get("pieces") as Int ?: 16000
-        val buffer = ByteBuffer.allocate(17)
-        buffer.putInt(9 + selectedPieceBlock.size)
+    private fun sendPieceMessage(info: Map<String, Any>, selectedPieceBlock: ByteArray, pieceIndex: Long, connectedPeer: ConnectedPeerManager) : Int {
+        val request = connectedPeer.requestedPiecesDetails[pieceIndex] ?: throw IllegalStateException("no request")
+        val buffer = ByteBuffer.allocate(13 + request.length.toInt())
+        buffer.putInt(9 + request.length.toInt()) //message length
         val msg_id = 7
-        buffer.put(msg_id.toByte())
-        buffer.putInt(pieceIndex.toInt())
+        buffer.put(msg_id.toByte()) //message id
+        buffer.putInt(pieceIndex.toInt()) //index
         // begin: integer specifying the zero-based byte offset within the piece. all the pieces except the last one are the same size so the calculation is #pices*pieceSize
-        val blockbegin = (0 + pieceIndex * requestedPieceLength).toInt()
-        buffer.putInt(blockbegin)
-        buffer.put(selectedPieceBlock)
+        val blockbegin = request.begin.toInt()
+        buffer.putInt(blockbegin) //begin
+        buffer.put(selectedPieceBlock.sliceArray(IntRange(blockbegin, blockbegin + request.length.toInt() - 1)))
         connectedPeer.socket.getOutputStream().write(buffer.array())
+        connectedPeer.requestedPieces.remove(pieceIndex)
+        connectedPeer.requestedPiecesDetails.remove(pieceIndex)
+        return request.length.toInt()
     }
 
-    private fun checkForPeerPieceRequest(connectedPeer: ConnectedPeerManager, selectedPieceBlock: ByteArray) : Boolean{
-        val inputStream = connectedPeer.socket.getInputStream()
-        val pieceIndex = inputStream.read()
-        val begin = inputStream.read()
-        val block = ByteArray(selectedPieceBlock.size)
-        inputStream.read(block)
-        if (block.isEmpty()){
-            throw IllegalArgumentException("peer did not send request")
-            return false
-        }else{
-            return true
-        }
-    }
 
     /**
      * List pieces that are currently available for download immediately.
@@ -889,27 +896,29 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             val indexesWeHave =piecesStatsThatAlreadyBeenDownloadedMap.filter{ it -> it.value.isValid }.map { it -> it.key }
             database.torrentsRead(infohash).thenApply {
                 //val pieces = it["pieces"] as String
-                val piecelength = ((it["info"] as Map<String, Any>)["piece length"] as Long)
-                val files = it["files"] as Map<String,Map<String,Any>> //TODO ["info"]
+                val pieces = ((it["info"] as Map<String, Any>)["pieces"] as ByteArray).size//TODO: cover single file option
+                val piecelength = ((it["info"] as Map<String, Any>)["piece length"] as Long)//TODO: cover single file option
+                val files = (it["info"] as Map<String,Any>)["files"] as List<Map<String,Any>>
                 var fileOffset = 0
-                for ((file, fileMap) in files){
-                    var fileEntireByteArray = byteArrayOf()
-                    var fileLength = fileMap["length"] as Long
-                    var piecesWeHaveOfThisFile = indexesWeHave.filter { index -> index*piecelength  in  fileOffset..(fileOffset + fileLength)}
-                    if (piecesWeHaveOfThisFile.isNotEmpty()){
-                        for( i in piecesWeHaveOfThisFile.min()!!..piecesWeHaveOfThisFile.max()!!){
-                            if (i in indexesWeHave){
-                                database.indexedPieceRead(infohash,i).thenAccept { pieceContent -> fileEntireByteArray += pieceContent }
-                            }else{
-                                fileEntireByteArray += ByteArray(piecelength.toInt())
-                            }
-                        }
-                        fileEntireByteArray = fileEntireByteArray.copyOfRange(0,fileLength.toInt())//if we add more zero bye array than we should
-                        var filePath = Ben((fileMap["path"] as String).toByteArray()).decode() as List<String>
-                        val fileNameAndPath: String = "" + filePath.joinToString("/") //the path as required in the doc
-                        res[fileNameAndPath] = fileEntireByteArray
+
+                val numOfPieces = pieces/20
+                var entireByteArray = byteArrayOf()
+                for( i in 0.until(numOfPieces)){
+                    if (i.toLong() in indexesWeHave){
+                        database.indexedPieceRead(infohash,i.toLong()).thenAccept { pieceContent -> entireByteArray += pieceContent }.get()
+                    }else{
+                        entireByteArray += ByteArray(piecelength.toInt(), { 0 })
                     }
-                    fileOffset += piecelength.toInt()
+                }
+                for (fileMap in files){
+                    var fileLength = fileMap["length"] as Long
+                    if (indexesWeHave.filter { index -> index* piecelength in fileOffset..(fileOffset+fileLength) }.isNotEmpty()){
+                        var currentfileEntireByteArray = entireByteArray.copyOfRange(fileOffset,fileOffset+ fileLength.toInt())//if we add more zero bye array than we should
+                        var filePath = fileMap["path"] as List<String>
+                        val fileNameAndPath: String = "" + filePath.joinToString("/") //the path as required in the doc
+                        res[fileNameAndPath] = currentfileEntireByteArray
+                    }
+                    fileOffset += fileLength.toInt()
                 }
             }
             res
