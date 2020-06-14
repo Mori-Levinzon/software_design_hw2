@@ -32,7 +32,7 @@ class CourseTorrentHW0Test {
     private var trackerStatsStorage = HashMap<String, ByteArray>()
     private var announcesStorage = HashMap<String, ByteArray>()
     private var piecesStatsStorage = HashMap<String, ByteArray>()
-    private var indexedPieceStorage = HashMap<String, ByteArray>()//TODO: not really like this
+    private var indexedPieceStorage = HashMap<String, ByteArray>()
 
     @BeforeEach
     fun `initialize CourseTorrent with mocked DB`() {

@@ -622,7 +622,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      */
     fun requestPiece(infohash: String, peer: KnownPeer, pieceIndex: Long): CompletableFuture<Unit> {
         return database.torrentsRead(infohash).thenApply {torrent->
-                torrent ?: throw IllegalStateException("torrent does not exist")
+                torrent ?: throw IllegalArgumentException("torrent does not exist")
                 val info = torrent["info"] as Map<String, Any>
                 val pieces = info?.get("pieces") as String
 
@@ -633,26 +633,31 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 val connectedPeer = this.connectedPeers[infohash]?.filter {
                     connectedPeer1 -> connectedPeer1.connectedPeer.knownPeer == peer
                 }?.getOrNull(0) ?: throw java.lang.IllegalArgumentException("infohash or peer invalid")
+
                 if (connectedPeer.connectedPeer.peerChoking) throw PeerChokedException("peer choked the client")
 
                 try{
-                    val expectedBlockbegin = sendRequestMessage(info, pieceIndex, connectedPeer)
+                    var peerMessage = PeerMessage(0,0,-1, byteArrayOf(0),-1)
+                    var expectedBlockBeginOffset : Long = 0
+                    val startTime = System.currentTimeMillis()
 
-                    val (recievedPieceIndex, recievedBlockBegin, block) = recievePieceMessage(connectedPeer, info)
+                    while(peerMessage.messageResult == -1){
+                        expectedBlockBeginOffset = sendRequestMessage(info, pieceIndex, connectedPeer)
 
-                    if (recievedPieceIndex != pieceIndex.toInt() ||
-                            recievedBlockBegin != expectedBlockbegin ||
-                            sha1hash(block) != pieces[pieceIndex.toInt()].toString()) throw PieceHashException("piece does not match the hash from the meta-info file")
+                        peerMessage = getPieceMessage(connectedPeer, info)//when the block is not empty the result from the read is number of bytes read otherwise it's -1
+
+                        if (connectedPeer.connectedPeer.peerChoking) throw PeerChokedException("peer choked the client")
+                    }
+
+                    val elapsedTime = System.currentTimeMillis() - startTime
+
+                    if (peerMessage.index != pieceIndex ||
+                            peerMessage.begin != expectedBlockBeginOffset ||
+                            sha1hash(peerMessage.block) != pieces[pieceIndex.toInt()].toString()) throw PieceHashException("piece does not match the hash from the meta-info file")
 
                     //update the stats db
                     database.piecesStatsRead(infohash).thenApply { immutabletorrentStats->
-                        var torrentStats = immutabletorrentStats.toMutableMap()
-                        var pieceStats  = torrentStats[pieceIndex]!!
-                        pieceStats.downloaded = pieceStats.downloaded + (block.size)
-                        pieceStats.left = (pieceStats.left ?: (info?.get("pieces") as Long ?: 16000 ) ) - (block.size)
-                        pieceStats.isValid = true
-                        //TODO: what other data should be save except the two rows above
-                        torrentStats[pieceIndex] = pieceStats
+                        var torrentStats = updatePieceStatsFromSuccessfulPieceRequest(immutabletorrentStats, pieceIndex, peerMessage, elapsedTime)
                         torrentStats
                     }.thenApply { updatedTorrentStats ->
                         database.piecesStatsUpdate(infohash, updatedTorrentStats)
@@ -662,23 +667,36 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     e.printStackTrace()
                     throw PeerConnectException("Peer connection failed")
                 }
-            val one =1
+            Unit
         }
     }
 
-    private fun recievePieceMessage(connectedPeer: ConnectedPeerManager, info: Map<String, Any>?): Triple<Int, Int, ByteArray> {
-        //length of piece message is 17
-        val inputStream = connectedPeer.socket.getInputStream()
-        val recievedPieceIndex = inputStream.read()
-        val recievedBlockBegin = inputStream.read()
-        val expectedPieceLength = info?.get("pieces") as Int ?: 16000
-        val block = ByteArray(expectedPieceLength)
-        inputStream.read(block)
-        return Triple(recievedPieceIndex, recievedBlockBegin, block)
+    private fun updatePieceStatsFromSuccessfulPieceRequest(immutabletorrentStats: Map<Long, PieceIndexStats>, pieceIndex: Long, peerMessage: PeerMessage, elapsedTime: Long): MutableMap<Long, PieceIndexStats> {
+        var torrentStats = immutabletorrentStats.toMutableMap()
+        var pieceStats = torrentStats[pieceIndex]!!
+        pieceStats.downloaded = pieceStats.downloaded + (peerMessage.block.size)
+        pieceStats.wasted = pieceStats.wasted + (peerMessage.block.size)
+        pieceStats.left = 0
+        pieceStats.seedTime = pieceStats.seedTime.plusMillis(elapsedTime)
+        pieceStats.isValid = true
+        torrentStats[pieceIndex] = pieceStats
+        return torrentStats
     }
 
-    private fun sendRequestMessage(info: Map<String, Any>?, pieceIndex: Long, connectedPeer: ConnectedPeerManager): Int{
-        val requestedPieceLength = info?.get("pieces") as Int ?: 16000
+    private fun getPieceMessage(connectedPeer: ConnectedPeerManager, info: Map<String, Any>): PeerMessage {
+        val inputStream = connectedPeer.socket.getInputStream()
+        var recievedPieceIndex = inputStream.read().toLong()
+        var recievedBlockBeginOffset = inputStream.read().toLong()
+        //excpect for this length
+        val expectedPieceLength = info?.get("piece length") as Int ?: 16000
+        var recievedPieceBlock = ByteArray(expectedPieceLength)
+        //will fill less than this if less is sent
+        var messageResult = inputStream.read(recievedPieceBlock)
+        return  PeerMessage(recievedPieceIndex, recievedBlockBeginOffset, recievedPieceBlock.size.toLong(), recievedPieceBlock, messageResult)
+    }
+
+    private fun sendRequestMessage(info: Map<String, Any>?, pieceIndex: Long, connectedPeer: ConnectedPeerManager): Long{
+        val requestedPieceLength = info?.get("piece length") as Int ?: 16000
 
         val buffer = ByteBuffer.allocate(17)
         //message len which should be 13
@@ -688,14 +706,14 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         //index: integer specifying the zero-based piece index
         buffer.putInt(pieceIndex.toInt())
         // begin: integer specifying the zero-based byte offset within the piece. all the pieces except the last one are the same size so the calculation is #pices*pieceSize
-        val expectedBlockbegin = (0 + pieceIndex * requestedPieceLength).toInt()
-        buffer.putInt(expectedBlockbegin)
+        val expectedBlockbegin = (0 + pieceIndex * requestedPieceLength)
+        buffer.putInt(expectedBlockbegin.toInt())
         //length: integer specifying the requested length. Requests should be of piece subsets of length 16KB (2^14 bytes) which is 16000 b
         buffer.putInt(requestedPieceLength)
 
         connectedPeer.socket.getOutputStream().write(buffer.array())
 
-        return expectedBlockbegin
+        return expectedBlockbegin.toLong()
     }
 
     /**
