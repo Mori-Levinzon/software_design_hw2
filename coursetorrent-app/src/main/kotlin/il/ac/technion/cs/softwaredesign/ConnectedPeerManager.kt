@@ -1,6 +1,7 @@
 package il.ac.technion.cs.softwaredesign
 
 import java.net.Socket
+import java.time.Duration
 import kotlin.experimental.and
 
 class ConnectedPeerManager(
@@ -8,7 +9,9 @@ class ConnectedPeerManager(
         var socket: Socket,
         var availablePieces: MutableList<Long>,
         var requestedPieces: MutableList<Long>,
-        var requestedPiecesDetails: MutableMap<Long, PeerMessage>
+        var requestedPiecesDetails: MutableMap<Long, PeerMessage>,
+        var downloaded: Long,
+        var leechTime: Duration
 ) {
     /*
      * Messages to receive and handle from peers:

@@ -167,7 +167,7 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     private fun create(storage: SecureStorage, key: String, value: ByteArray): CompletableFuture<Unit> {
         return storage.read(key.toByteArray(charset)).thenApply {
             if (it == null || it.isEmpty()) {
-                null//TODO: should throw an exception right at this stage?
+                null
             } else {
                 it
             }
@@ -203,7 +203,7 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     private fun update(storage: SecureStorage, key: String, value: ByteArray): CompletableFuture<Unit> {
         return storage.read(key.toByteArray(charset)).thenApply {
             if (it == null || it.isEmpty()) {
-                null//TODO: should throw an exception right at this stage?
+                null
             } else {
                 it
             }

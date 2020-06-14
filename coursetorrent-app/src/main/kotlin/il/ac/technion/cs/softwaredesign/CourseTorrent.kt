@@ -59,16 +59,18 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
 
                     val metaInfo = Ben(torrent).decode() as Map<String, Any>
                     val numOfPieces = ((metaInfo["info"] as Map<String,Any>)["pieces"] as ByteArray).size /20
+                    val pieceLength = ((metaInfo["info"] as Map<String,Any>)["piece length"] as Long)
+                    val lastPieceLength = getTorrentSize(metaInfo) - (numOfPieces - 1) * pieceLength
                     val piecesMap : MutableMap<Long,PieceIndexStats> = mutableMapOf()
-                    for (i in 0 until numOfPieces){
-                        piecesMap[i.toLong()] = PieceIndexStats(0,0,0,0,false, Duration.ZERO, Duration.ZERO)
+                    for (i in 0 until numOfPieces-1){
+                        piecesMap[i.toLong()] = PieceIndexStats(0,0, pieceLength,0,false, Duration.ZERO, Duration.ZERO)
                     }
+                    piecesMap[numOfPieces.toLong()-1] = PieceIndexStats(0,0, lastPieceLength,0,false, Duration.ZERO, Duration.ZERO)
                     database.piecesStatsCreate(infohash, piecesMap.toMap() )
 //                    database.piecesStatsCreate(infohash, mapOf() )
 
                     database.torrentsCreate(infohash, Ben(torrent).decode() as Map<String, Any>)
                     database.allpiecesCreate(infohash, numOfPieces.toLong())
-                    //TODO make database for each piece
                 }catch (e: IllegalStateException) {
                     e.printStackTrace()
                     throw IllegalStateException("Same infohash already loaded")
@@ -88,7 +90,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
     fun unload(infohash: String): CompletableFuture<Unit> {
         return database.torrentsRead(infohash).thenApply {torrent ->
                     val numOfPieces = ((torrent["info"] as Map<String,Any>)["pieces"] as ByteArray).size /20
-                    database.allpiecesDelete(infohash,numOfPieces.toLong())//TODO: create a read for the number of pieces that thier DB need to be destroyed
+                    database.allpiecesDelete(infohash,numOfPieces.toLong())
                 }.thenApply {
             try {
                 database.announcesDelete(infohash)
@@ -314,9 +316,9 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     wasted += pieceIndexStats.wasted
                     havePieces += if (pieceIndexStats.isValid) 1 else 0
                     leechTime += pieceIndexStats.leechTime
-                    seedTime += pieceIndexStats.leechTime
+                    seedTime += pieceIndexStats.seedTime
                 }
-                val havePieces: Long = pieceMap.size.toLong()
+                val havePieces: Long = pieceMap.filter { it-> it.value.isValid }.size.toLong()
                 if (downloaded.toInt() == 0) {//haha it would be funny if there were no download time and it was zero
                     shareRatio = uploaded.toDouble()
                 } else {
@@ -438,7 +440,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         val connectedPeerMan = ConnectedPeerManager(
                 ConnectedPeer(newPeer, true, false, true, false,
                         0.0, 0.0),
-                s, listOf<Long>().toMutableList(), listOf<Long>().toMutableList(), mutableMapOf())
+                s, listOf<Long>().toMutableList(), listOf<Long>().toMutableList(), mutableMapOf(), 0L, Duration.ofMillis(0))
         this.connectedPeers[infohash]?.add(connectedPeerMan)
         //send bitfield message
         return database.piecesStatsRead(infohash).thenApply { piecesMap ->
@@ -489,11 +491,30 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @throws IllegalArgumentException if [infohash] is not loaded.
      */
     fun connectedPeers(infohash: String): CompletableFuture<List<ConnectedPeer>> {
-        return CompletableFuture.supplyAsync {
-            //TODO: perhaps compute average speed here?
-            this.connectedPeers.values.flatten().map { it -> it.connectedPeer }
+        return database.torrentsRead(infohash).thenApply { torrent->
+            torrent ?: throw IllegalArgumentException()
+            val totalBytes = getTorrentSize(torrent)
+            this.connectedPeers.values.flatten().map { it ->
+                val avgSpeed = if (it.leechTime.isZero) { 0.0 } else { it.downloaded * 1.0 / it.leechTime.seconds }
+                it.connectedPeer = it.connectedPeer.copy(completedPercentage = it.downloaded * 1.0 / totalBytes, averageSpeed = avgSpeed)
+                it.connectedPeer
+            }
         }
     }
+
+    private fun getTorrentSize(torrent: Map<String, Any>): Long {
+        val filesList = (torrent["info"] as Map<String, Any>)["files"] as? ArrayList<Map<String, Any>> ?: arrayListOf()
+
+        if (filesList.isEmpty()) {
+            val fileName = (torrent["info"] as Map<String, Any>)["name"] as String
+            val fileLength = (torrent["info"] as Map<String, Any>)["length"] as Long
+            filesList.add(mapOf("path" to listOf(fileName), "length" to fileLength))
+        }
+
+        val totalBytes = filesList.map { it -> it["length"] as Long }.sum()
+        return totalBytes
+    }
+
 
     /**
      * Send a choke message to [peer], which is currently connected. Future calls to [connectedPeers] should show that
@@ -674,10 +695,14 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     //update the stats db
                     database.piecesStatsRead(infohash).thenApply { immutabletorrentStats->
                         var torrentStats = updatePieceStatsFromSuccessfulPieceRequest(immutabletorrentStats, pieceIndex, peerMessage, elapsedTime)
+
+                        connectedPeer.downloaded += (peerMessage.block.size)
+                        connectedPeer.leechTime = connectedPeer.leechTime.plusMillis(elapsedTime)
                         torrentStats
                     }.thenApply { updatedTorrentStats ->
                         database.piecesStatsUpdate(infohash, updatedTorrentStats)
                         database.indexedPieceUpdate(infohash,pieceIndex, peerMessage.block)
+
                     }
                 }
                 catch (e: Exception) {
@@ -692,7 +717,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         var torrentStats = immutabletorrentStats.toMutableMap()
         var pieceStats = torrentStats[pieceIndex]!!
         pieceStats.downloaded = pieceStats.downloaded + (peerMessage.block.size)
-        pieceStats.left = 0
+        pieceStats.left = pieceStats.left - (peerMessage.block.size)
         pieceStats.leechTime = pieceStats.leechTime.plusMillis(elapsedTime)
         pieceStats.isValid = true
         torrentStats[pieceIndex] = pieceStats
@@ -754,22 +779,21 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
      * @throws IllegalArgumentException if [infohash] is not loaded, [peer] is not known, or [peer] did not request [pieceIndex].
      */
     fun sendPiece(infohash: String, peer: KnownPeer, pieceIndex: Long): CompletableFuture<Unit> {
-        return database.torrentsRead(infohash).thenApply { torrent ->
+        return database.torrentsRead(infohash).thenCompose { torrent ->
                 torrent ?: throw IllegalStateException("torrent does not exist")
                 val info = torrent["info"] as Map<String, Any>
                 database.indexedPieceRead(infohash,pieceIndex).thenApply { selectedPieceBlock->
                     val connectedPeer = this.connectedPeers[infohash]?.filter {
                         connectedPeer1 -> connectedPeer1.connectedPeer.knownPeer == peer
                     }?.getOrNull(0) ?: throw java.lang.IllegalArgumentException("infohash or peer invalid")
-                    if (connectedPeer.connectedPeer.peerChoking) throw IllegalArgumentException("peer choked the client")
 
                     val startTime = System.currentTimeMillis()
 
                     var sent = 0
 
                     if (!connectedPeer.requestedPieces.contains(pieceIndex)){
-                        sleep (100)
-                        connectedPeer.handleIncomingMessages()
+                        throw java.lang.IllegalArgumentException("wrong piece index requested")
+
                     }
                     while (connectedPeer.requestedPieces.contains(pieceIndex)){
                         sent = sendPieceMessage(info, selectedPieceBlock, pieceIndex, connectedPeer)
@@ -793,7 +817,6 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                     }
 
                 }
-            Unit
         }
     }
 
@@ -896,9 +919,19 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             val indexesWeHave =piecesStatsThatAlreadyBeenDownloadedMap.filter{ it -> it.value.isValid }.map { it -> it.key }
             database.torrentsRead(infohash).thenApply {
                 //val pieces = it["pieces"] as String
-                val pieces = ((it["info"] as Map<String, Any>)["pieces"] as ByteArray).size//TODO: cover single file option
-                val piecelength = ((it["info"] as Map<String, Any>)["piece length"] as Long)//TODO: cover single file option
-                val files = (it["info"] as Map<String,Any>)["files"] as List<Map<String,Any>>
+
+                val pieces = ((it["info"] as Map<String, Any>)["pieces"] as ByteArray).size
+                val piecelength = ((it["info"] as Map<String, Any>)["piece length"] as Long)
+
+
+                val files = (it["info"] as Map<String,Any>)["files"] as? ArrayList<Map<String,Any>> ?: arrayListOf()
+
+                if(files.isEmpty()) {
+                    val fileName = (it["info"] as Map<String, Any>)["name"] as String
+                    val fileLength = (it["info"] as Map<String, Any>)["length"] as Long
+                    files.add(mapOf("path" to listOf(fileName), "length" to fileLength))
+                }
+
                 var fileOffset = 0
 
                 val numOfPieces = pieces/20
@@ -974,7 +1007,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
 
     private fun joinAllFilesToOneByteArray(torrent: Map<String, Any>, allfilesPieces: ByteArray, files: Map<String, ByteArray>): ByteArray {
         var allfilesPieces1 = allfilesPieces
-        val torrentFiles = (torrent["info"] as Map<String, Any>)["files"] as ArrayList<Map<String, *>>
+        val torrentFiles = (torrent["info"] as Map<String, Any>)["files"] as? ArrayList<Map<String, *>> ?: arrayListOf()
         if (torrentFiles.isNotEmpty()) {// multiple  file mode
             //get the file order
             var filesList: ArrayList<Map<String, *>> = torrentFiles
@@ -1017,7 +1050,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                             mutableloadedPiecesMap[index]!!.isValid = false
                         }
                         i +=20
-                    }.join() //TODO remove
+                    }.join()
                 }
                 database.piecesStatsUpdate(infohash,mutableloadedPiecesMap)
             }
@@ -1076,7 +1109,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
 
     private fun receiveHandshake(s : Socket) : DecodedHandshake {
         val receivedMessage = ByteArray(68)
-        s.getInputStream().read(receivedMessage) //TODO I assume this is blocking, if it isn't - do busy wait
+        s.getInputStream().read(receivedMessage)
         if(receivedMessage[0] != 19.toByte()) throw PeerConnectException("First byte is not 19")
         val decodedHandshake = WireProtocolDecoder.handshake(receivedMessage)
         return decodedHandshake
