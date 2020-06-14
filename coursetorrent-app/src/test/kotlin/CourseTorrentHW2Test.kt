@@ -19,6 +19,7 @@ import java.lang.IllegalArgumentException
 import java.lang.IllegalStateException
 import java.util.concurrent.CompletionException
 import io.github.vjames19.futures.jdk8.ImmediateFuture
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertDoesNotThrow
 import org.junit.jupiter.api.assertThrows
@@ -28,6 +29,7 @@ import java.nio.ByteBuffer
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
+import kotlin.experimental.and
 
 class CourseTorrentHW2Test {
     private val injector = Guice.createInjector(CourseTorrentModule())
@@ -784,6 +786,25 @@ class CourseTorrentHW2Test {
         val message = WireProtocolDecoder.decode(sock.inputStream.readNBytes(5), 0)
 
         assertThat(message.messageId, equalTo(1.toByte()))
+
+        torrent.stop().get()
+        sock.close()
+    }
+
+    @Test
+    fun `sends bitfield message when has all files`() {
+        val infohash = torrent.load(lame).get()
+
+        torrent.loadFiles(
+                infohash,
+                mapOf("lame.exe" to lameExe.readBytes(), "lame_enc.dll" to lameEnc.readBytes())
+        ).join()
+
+        val sock = initiateRemotePeer(infohash)
+
+        val message = sock.getInputStream().readNBytes(sock.getInputStream().available())
+        val bitfield = WireProtocolDecoder.decode(message, 0).contents
+        assertTrue(bitfield.filter { byte -> byte != (-1).toByte() }.size <= 1)
 
         torrent.stop().get()
         sock.close()

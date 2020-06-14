@@ -604,9 +604,9 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                         } else { //torrent exists
                             val newPeer = KnownPeer(socket.inetAddress.hostAddress, socket.port,
                                     String(decodedHandshake.peerId))
-                            addNewPeer(newInfohash, socket, it, newPeer, null)
                             socket.getOutputStream().write(WireProtocolEncoder.handshake(decodedHandshake.infohash,
                                     this.getPeerID().toByteArray()))
+                            addNewPeer(newInfohash, socket, it, newPeer, null)
                         }
                         newPeerAcceptor()
                     }

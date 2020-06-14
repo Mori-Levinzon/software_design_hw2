@@ -22,38 +22,77 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     private val peersStorage : CompletableFuture<SecureStorage> = storageFactory.open("peers".toByteArray(charset))
     private val trackersStatsStorage : CompletableFuture<SecureStorage> = storageFactory.open("trackersStats".toByteArray(charset))
     private val piecesStatsStorage : CompletableFuture<SecureStorage> = storageFactory.open("piecesStats".toByteArray(charset))
-    private val piecesStorage : CompletableFuture<SecureStorage> = storageFactory.open("pieces".toByteArray(charset))
     private val storage : SecureStorageFactory = storageFactory
 
-
+    /**
+     * Creates a torrents database entry
+     * @param key the database key
+     * @param value the database value
+     */
     fun torrentsCreate(key: String, value: Map<String, Any>) : CompletableFuture<Unit> {
         return torrentsStorage.thenCompose { create(it, key, Ben.encodeStr(value).toByteArray())}
     }
+    /**
+     * Creates an announces database entry
+     * @param key the database key
+     * @param value the database value
+     */
     fun announcesCreate(key: String, value: List<List<String>>) : CompletableFuture<Unit> {
         return announcesStorage.thenCompose { create(it, key, Ben.encodeStr(value).toByteArray())}
     }
+    /**
+     * Creates a peers database entry
+     * @param key the database key
+     * @param value the database value
+     */
     fun peersCreate(key: String, value: List<Map<String, String>>) : CompletableFuture<Unit> {
         return peersStorage.thenCompose { create(it, key, Ben.encodeStr(value).toByteArray())}
     }
+    /**
+     * Creates a tracker stats database entry
+     * @param key the database key
+     * @param value the database value
+     */
     fun trackersStatsCreate(key: String, value: Map<String, Map<String, Any>>) : CompletableFuture<Unit> {
         return trackersStatsStorage.thenCompose { create(it, key, Ben.encodeStr(value).toByteArray())}
     }
+    /**
+     * Creates a pieces stats database entry
+     * @param key the database key
+     * @param value the database value
+     */
     fun piecesStatsCreate(key: String, piecesMap: Map<Long,PieceIndexStats>) : CompletableFuture<Unit> {
         return piecesStatsStorage.thenCompose { create(it, key, Ben.encodeStr(piecesMap.mapValues { pair -> pair.value.toMap() }.mapKeys { it.key.toString() }).toByteArray())}
 //        return piecesStatsStorage.thenCompose { create(it, key, Ben.encodeStr(piecesMap).toByteArray())}
     }
+    /**
+     * Creates an indexed piece database entry
+     * @param infohash the piece's torrent infohash
+     * @param index the piece index
+     * @param value the database value
+     */
     fun indexedPieceCreate(infohash: String, index: Long, value: ByteArray) : CompletableFuture<Unit> {//this one is rather Unnecessary since we can create a database each time we update a piece
         return storage.open((infohash+index.toString()).toByteArray(charset)).thenCompose{ create(it, (infohash+index.toString()), value)}
     }
 
+    /**
+     * Creates all indexed piece initial entries
+     * @param infohash the torrent infohash
+     * @param piecesSize the number of pieces
+     */
     fun allpiecesCreate(infohash: String, piecesSize: Long) : CompletableFuture<Unit> {
         return CompletableFuture.supplyAsync {
             for (i in 0 until piecesSize){
-                indexedPieceCreate(infohash,i, byteArrayOf(0))
+                indexedPieceCreate(infohash,i, byteArrayOf(0)).join()
             }
         }
     }
 
+    /**
+     * reads a value from the torrent database
+     * @param key the databse key
+     * @throws IllegalStateException if somehow the database value is type unsafe
+     */
     fun torrentsRead(key: String) : CompletableFuture<Map<String, Any>> {
         return torrentsStorage.thenApply { read(it,key) }
                 .thenCompose { dbContent ->  dbContent }//to extract the value from the CompletableFuture
@@ -110,24 +149,24 @@ class SimpleDB @Inject constructor(storageFactory: SecureStorageFactory, private
     }
 
     fun torrentsUpdate(key: String, value: Map<String, Any>) : Unit {
-        torrentsStorage.thenApply { update(it, key, Ben.encodeStr(value).toByteArray())}
+        torrentsStorage.thenApply { update(it, key, Ben.encodeStr(value).toByteArray())}.join()
     }
     fun announcesUpdate(key: String, value: List<List<String>>) : Unit {
-        announcesStorage.thenApply { update(it, key, Ben.encodeStr(value).toByteArray())}
+        announcesStorage.thenApply { update(it, key, Ben.encodeStr(value).toByteArray())}.join()
     }
     fun peersUpdate(key: String, value: List<Map<String, String>>) : Unit {
-        peersStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray())}
+        peersStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray())}.join()
     }
     fun trackersStatsUpdate(key: String, value: Map<String, Map<String, Any>>) : Unit {
-        trackersStatsStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray())}
+        trackersStatsStorage.thenApply {update(it, key, Ben.encodeStr(value).toByteArray())}.join()
     }
     fun piecesStatsUpdate(key: String, value: Map<Long, PieceIndexStats>) : Unit {
-        piecesStatsStorage.thenApply {update(it, key, Ben.encodeStr(value.mapValues { it.value.toMap() }.mapKeys { it.key.toString() }).toByteArray())}
+        piecesStatsStorage.thenApply {update(it, key, Ben.encodeStr(value.mapValues { it.value.toMap() }.mapKeys { it.key.toString() }).toByteArray())}.join()
     }
 
     fun indexedPieceUpdate(infohash: String, index: Long, value: ByteArray) : Unit {
         storage.open((infohash+index).toByteArray(charset))
-                .thenApply {update(it, (infohash+index.toString()), value)}
+                .thenApply {update(it, (infohash+index.toString()), value)}.join()
     }
 
     fun torrentsDelete(key: String) : CompletableFuture<Unit> {
