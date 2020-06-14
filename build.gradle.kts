@@ -4,6 +4,7 @@ import java.time.Duration
 
 plugins {
     kotlin("jvm") version "1.3.72"
+    id("org.jetbrains.dokka") version "0.10.1"
 }
 
 allprojects {
@@ -66,4 +67,14 @@ task<Zip>("submission") {
         exclude("$base/$taskname.zip")
     }
     destinationDirectory.set(project.rootDir)
+}
+
+
+
+tasks {
+    val dokka by getting(org.jetbrains.dokka.gradle.DokkaTask::class) {
+        outputFormat = "html"
+        outputDirectory = "$buildDir/javadoc"
+        subProjects = listOf("coursetorrent-app", "library")
+    }
 }
