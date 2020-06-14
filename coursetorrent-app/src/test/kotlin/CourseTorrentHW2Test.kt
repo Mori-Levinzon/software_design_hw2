@@ -24,6 +24,7 @@ import org.junit.jupiter.api.assertDoesNotThrow
 import org.junit.jupiter.api.assertThrows
 import java.net.ServerSocket
 import java.net.Socket
+import java.nio.ByteBuffer
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
 
@@ -549,32 +550,49 @@ class CourseTorrentHW2Test {
     }
 
     @Test
-    fun `requestPiece throws exception for the wrong infohash `() {
+    fun `requestPiece recieves a valid piece from peer`() {
 
         val infohash = torrent.load(lame).get()
 
         val sock = initiateRemotePeer(infohash)
 
+        torrent.loadFiles(
+                infohash,
+                mapOf("lame.exe" to lameExe.readBytes(), "lame_enc.dll" to lameEnc.readBytes())
+        )
+                .thenCompose { torrent.recheck(infohash) }.get()
+
+
+
         sock.outputStream.write(WireProtocolEncoder.encode(4, 0))
         sock.outputStream.write(WireProtocolEncoder.encode(1)) //  unchoke peer
         sock.outputStream.write(WireProtocolEncoder.encode(2)) //  interested peer
-//        sock.outputStream.write(WireProtocolEncoder.encode(7,0,0,block)) //  sent piece that request in the request piece
         sock.outputStream.flush()
+
+
+        val knownPeers = torrent.knownPeers(infohash).get()
+        val connectedPeers = torrent.connectedPeers(infohash).get()
+
+
 
         val pieces = assertDoesNotThrow {
             torrent.handleSmallMessages().get()
             torrent.availablePieces(infohash, 10, 0).get()
         }
 
+        val index: Long = sendPieceInTheStream(infohash, sock)
 
-        val knownPeers = torrent.knownPeers(infohash).get()
-        val connectedPeers = torrent.connectedPeers(infohash).thenAcceptAsync {
-            torrent.sendPiece(infohash,it[0].knownPeer,0).get()
-            torrent.requestPiece(infohash,it[0].knownPeer,0).get()
-            torrent.sendPiece(infohash,it[0].knownPeer,0).get()
-        }.get()
 
-        val stats = torrent.torrentStats(infohash)
+
+//            torrent.sendPiece(infohash,connectedPeers[0].knownPeer,0)
+        torrent.requestPiece(infohash,connectedPeers[0].knownPeer,0).get()
+
+        val stats =torrent.torrentStats(infohash).get()
+
+
+//        val index=0
+        assertThat(stats.downloaded.toInt(), equalTo(indexedPieceStorage[infohash+index.toString()]?.size))
+        assertThat(stats.uploaded.toInt(), equalTo(indexedPieceStorage[infohash+index.toString()]?.size))
 
         //TODO: check torrent stats
 
@@ -583,11 +601,22 @@ class CourseTorrentHW2Test {
         sock.close()
     }
 
-
-
-
-
-
+    private fun sendPieceInTheStream(infohash: String, sock: Socket): Long {
+        val index: Long = 0
+        val requestedPieceLength = indexedPieceStorage[infohash + index.toString()]?.size
+        val buffer = ByteBuffer.allocate(17)
+        buffer.putInt(9 + requestedPieceLength!!)
+        val msg_id = 7
+        buffer.put(msg_id.toByte())
+        buffer.putInt(index.toInt())
+        // begin: integer specifying the zero-based byte offset within the piece. all the pieces except the last one are the same size so the calculation is #pices*pieceSize
+        val blockbegin = (0 + index * requestedPieceLength).toInt()
+        buffer.putInt(blockbegin)
+        buffer.put(indexedPieceStorage[infohash + index.toString()])
+        sock.getOutputStream().write(buffer.array())
+        sock.outputStream.flush()
+        return index
+    }
 
 
     @Test

@@ -712,7 +712,7 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
     }
 
     private fun sendRequestMessage(info: Map<String, Any>?, pieceIndex: Long, connectedPeer: ConnectedPeerManager): Long{
-        val requestedPieceLength = info?.get("piece length") as Int ?: 16000
+        val requestedPieceLength = info?.get("piece length") as Long
 
         val buffer = ByteBuffer.allocate(17)
         //message len which should be 13
@@ -722,10 +722,10 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         //index: integer specifying the zero-based piece index
         buffer.putInt(pieceIndex.toInt())
         // begin: integer specifying the zero-based byte offset within the piece. all the pieces except the last one are the same size so the calculation is #pices*pieceSize
-        val expectedBlockbegin = (0 + pieceIndex * requestedPieceLength)
+        val expectedBlockbegin = (0 + pieceIndex.toInt() * requestedPieceLength.toInt())
         buffer.putInt(expectedBlockbegin.toInt())
         //length: integer specifying the requested length. Requests should be of piece subsets of length 16KB (2^14 bytes) which is 16000 b
-        buffer.putInt(requestedPieceLength)
+        buffer.putInt(requestedPieceLength.toInt())
 
         connectedPeer.socket.getOutputStream().write(buffer.array())
 
@@ -752,7 +752,6 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         return database.torrentsRead(infohash).thenApply { torrent ->
                 torrent ?: throw IllegalStateException("torrent does not exist")
                 val info = torrent["info"] as Map<String, Any>
-                val pieces = info?.get("pieces") as String
                 database.indexedPieceRead(infohash,pieceIndex).thenApply { selectedPieceBlock->
                     val connectedPeer = this.connectedPeers[infohash]?.filter {
                         connectedPeer1 -> connectedPeer1.connectedPeer.knownPeer == peer
