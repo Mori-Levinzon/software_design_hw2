@@ -1,4 +1,4 @@
-# CourseTorrent: Assignment 1
+# CourseTorrent: Assignment 2
 
 ## Authors
 * Bahjat Kawar, 206989105
