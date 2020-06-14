@@ -87,6 +87,12 @@ class Ben(val byteArray: ByteArray, var i: Int = 0) {
     }
 
     companion object {
+        /**
+         * Bencodes an object into a Bencoded string
+         * DOES NOT SUPPORT RAW BYTEARRAYS
+         * @param obj an object, which is an int, long, string, list, or map, that can only consist of the said types as well
+         * @return [obj] bencoded as a string
+         */
         fun encodeStr(obj: Any): String = when (obj) {
             is Int -> "i${obj}e"
             is Long -> "i${obj}e"
@@ -102,6 +108,12 @@ class Ben(val byteArray: ByteArray, var i: Int = 0) {
             }.joinToString("")}e"
             else -> throw IllegalStateException()
         }
+
+        /**
+         * Bencodes an object into a Bencoded byte array
+         * @param obj an object, which is an int, long, string, byteArray, UByteArray, list, or map, that can only consist of the said types as well
+         * @return [obj] bencoded as a string
+         */
         fun encodeByteArray(obj: Any): ByteArray = when (obj) {
             is Int -> "i${obj}e".toByteArray()
             is Long -> "i${obj}e".toByteArray()

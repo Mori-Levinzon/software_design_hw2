@@ -41,6 +41,11 @@ class Utils {
             return myHex
         }
 
+        /**
+         * Converts a hex encoded string (usually infohash) into a bytearray
+         * @param str the encoded string
+         * @return the resulting byte array
+         */
         fun infohashToByteArray(str:String):ByteArray {
             val allowedChars : List<Char> = ('a'..'z') + ('A'..'Z') + ('0'..'9') + ('.') + ('-') + ('_') + ('~')
             val strHexByteArray = UByteArray(str.length / 2)
@@ -51,10 +56,20 @@ class Utils {
             return strHexByteArray.toByteArray()
         }
 
+        /**
+         * Reverses the effect of [infohashToByteArray], i.e. converts a byte array into a hex encoded string
+         * @param the byte array
+         * @return a hex encoded string of the byte array
+         */
         fun byteArrayToInfohash(barr:ByteArray):String {
             return barr.fold("", { str, it -> str + "%02x".format(it) })
         }
 
+        /**
+         * Returns a string of random alphanumeric characters
+         * @param length the number of characters in the string
+         * @return the string of random alphanumeric characters
+         */
         fun getRandomChars(length: Int):String {
             if(length < 0) throw IllegalArgumentException();
             val allowedChars : List<Char> = ('a'..'z') + ('A'..'Z') + ('0'..'9')
@@ -63,6 +78,12 @@ class Utils {
                     .map(allowedChars::get).joinToString("")
         }
 
+        /**
+         * Compares two ip strings as they should be
+         * @param ip1 the first IP
+         * @param ip2 the second IP
+         * @return positive value if ip1 > ip2, 0 if ip1 == ip2, negative value otherwise
+         */
         fun compareIPs(ip1: String?, ip2: String?):Int {
             try {
                 if (ip1 == null || ip1.toString().isEmpty()) return -1
@@ -81,6 +102,11 @@ class Utils {
             }
         }
 
+        /**
+         * Adds URL-style get params to a string from a params list
+         * @param params the params list to add to the URL
+         * @return this string, with the added params
+         */
         fun String.withParams(params: List<Pair<String, String>>) : String {
             var toReturn = this + "?"
             for((key, value) in params.dropLast(1)) {
@@ -90,6 +116,10 @@ class Utils {
             return toReturn
         }
 
+        /**
+         * Transforms a PieceIndexStats object into a Bencodable map
+         * @return the map
+         */
         fun PieceIndexStats.toMap() : Map<String, Any> {
             return mapOf(
                     "uploaded" to this.uploaded,
@@ -102,6 +132,10 @@ class Utils {
             )
         }
 
+        /**
+         * Transforms a map into a PieceIndexStats object
+         * @return the PieceIndexStats object
+         */
         fun Map<String, Any>.toPieceIndexStats() : PieceIndexStats {
             return PieceIndexStats(
                     this["uploaded"] as Long,

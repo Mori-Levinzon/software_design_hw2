@@ -66,10 +66,19 @@ class ConnectedPeerManager(
         }
     }
 
+    /**
+     * Sends a keep alive message to the peer
+     */
     fun sendKeepAlive() : Unit {
         socket.getOutputStream().write(byteArrayOf(0.toByte()))
     }
 
+    /**
+     * If the peer has a piece that we want, and we are not interested, we become so.
+     * If the peer doesn't have a piece that we want, and we are interested, we stop being so.
+     * In both cases, we update the peer with our new status.
+     * @param piecesWeHaveMap a map of all the pieces that we already have (to decide what we want)
+     */
     fun decideIfInterested(piecesWeHaveMap : Map<Long, PieceIndexStats>) : Unit {
         val hasPieceThatWeWant = availablePieces.filter { index -> !piecesWeHaveMap.containsKey(index) }.isNotEmpty()
         if (connectedPeer.amInterested && !hasPieceThatWeWant) {
