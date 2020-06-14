@@ -421,7 +421,16 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             addNewPeer(infohash, s, it, newPeer, peer)
         }
     }
-
+    /**
+     * list peer should be listed to the  [connectedPeers]
+     **
+     * @param infohash : the torrent infohash
+     * @param s : socket of the new peer
+     * @param kPeers : known peers
+     * @param newPeer :peer to be added
+     * @param peerToRemove : peer to be removed if it was already existed
+     *
+     */
     private fun addNewPeer(infohash: String, s: Socket, kPeers : List<KnownPeer>, newPeer: KnownPeer, peerToRemove: KnownPeer?) : CompletableFuture<Unit> {
         //update known peers with peer id
         val listKnownPeers = kPeers.toMutableList()
@@ -501,6 +510,13 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             }
         }
     }
+    /**
+     * sums up all the files sizes
+     *
+     * @param  torrent: the meta-info Map that hold the torrent data
+     *
+     * @return the sum of the files sizes in the torrent
+     */
 
     private fun getTorrentSize(torrent: Map<String, Any>): Long {
         val filesList = (torrent["info"] as Map<String, Any>)["files"] as? ArrayList<Map<String, Any>> ?: arrayListOf()
@@ -712,6 +728,16 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             Unit
         }
     }
+    /**
+     * update stats about the piece in the stats DB
+     *
+     * @param  immutabletorrentStats : the meta-info Map that hold the torrent data
+     * @param  pieceIndex : index of the piece sent
+     * @param  peerMessage : data class that hold the data recieved fro mthe peer that sent the message
+     * @param  elapsedTime : time the piece download took (milliseconds)
+     *
+     * @return torrentStats: a dictionary that hold all the pieces stats
+     */
 
     private fun updatePieceStatsFromSuccessfulPieceRequest(immutabletorrentStats: Map<Long, PieceIndexStats>, pieceIndex: Long, peerMessage: PeerMessage, elapsedTime: Long): MutableMap<Long, PieceIndexStats> {
         var torrentStats = immutabletorrentStats.toMutableMap()
@@ -723,7 +749,16 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         torrentStats[pieceIndex] = pieceStats
         return torrentStats
     }
-
+    /**
+     * update stats about the piece in the stats DB
+     *
+     * @param  immutabletorrentStats : the meta-info Map that hold the torrent data
+     * @param  pieceIndex : index of the piece sent
+     * @param  peerMessage : struct that hold the data recieved fro mthe peer that sent the message
+     * @param  elapsedTime : time the piece download took (milliseconds)
+     *
+     * @return PeerMessage: data class that hold the data recieved from the peer
+     */
     private fun getPieceMessage(connectedPeer: ConnectedPeerManager, info: Map<String, Any>): PeerMessage {
         val inputStream = connectedPeer.socket.getInputStream()
         //excpect for this length
@@ -740,7 +775,15 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         var recievedPieceBlock = messageDecoded.contents
         return  PeerMessage(recievedPieceIndex, recievedBlockBeginOffset, recievedPieceBlock.size.toLong(), recievedPieceBlock, 1)
     }
-
+    /**
+     * send request message to the peer
+     *
+     * @param  info : the meta-info Map that hold the torrent data
+     * @param  pieceIndex : index of the piece sent
+     * @param  connectedPeer : the peer that we send the message
+     *
+     * @return torrentStats: a dictionary that hold all the pieces stats
+     */
     private fun sendRequestMessage(info: Map<String, Any>?, pieceIndex: Long, connectedPeer: ConnectedPeerManager): Long{
         val requestedPieceLength = info?.get("piece length") as Long
 
@@ -819,6 +862,16 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
                 }
         }
     }
+    /**
+     * Send piece number [pieceIndex] of the torrent to connectedPeer.
+     *
+     * @param  info : the meta-info Map that hold the torrent data
+     * @param  selectedPieceBlock : the piece sent
+     * @param  pieceIndex : index of the piece sent
+     * @param  connectedPeer : the peer that we send the message
+     *
+     * @return torrentStats: the length of the message recieved from the peer
+     */
 
     private fun sendPieceMessage(info: Map<String, Any>, selectedPieceBlock: ByteArray, pieceIndex: Long, connectedPeer: ConnectedPeerManager) : Int {
         val request = connectedPeer.requestedPiecesDetails[pieceIndex] ?: throw IllegalStateException("no request")
@@ -1004,6 +1057,16 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             }
 
     }
+    /**
+     * concatinate  all the files to one bytearray
+     *
+     * @param  torrent : the meta-info Map that hold the torrent data
+     * @param  allfilesPieces : the meta-info Map that hold the torrent data
+     * @param  files : the piece sent
+
+     *
+     * @return allfilesPieces1: bytearray the concatinate  all the files to one file
+     */
 
     private fun joinAllFilesToOneByteArray(torrent: Map<String, Any>, allfilesPieces: ByteArray, files: Map<String, ByteArray>): ByteArray {
         var allfilesPieces1 = allfilesPieces
@@ -1072,7 +1135,13 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
         builder.append(alphaNumericID)
         return builder.toString()
     }
-
+    /**
+     * add peers to the list of
+     *
+     * @param  infohash : the relevent torrent
+     * @param  newPeers : list of the peers to be added connected peers
+     *
+     */
     private fun addToPeers(infohash : String, newPeers : List<Map<String, String>>) : CompletableFuture<Unit>{
 
         return database.peersRead(infohash).thenApply() { it ->
@@ -1106,7 +1175,13 @@ class CourseTorrent @Inject constructor(private val database: SimpleDB) {
             return peers
         }
     }
-
+    /**
+     * return a handshake respone from the peer
+     *
+     * @param  s : the relevent torrent
+     *
+     * return the decoded handshake
+     */
     private fun receiveHandshake(s : Socket) : DecodedHandshake {
         val receivedMessage = ByteArray(68)
         s.getInputStream().read(receivedMessage)
