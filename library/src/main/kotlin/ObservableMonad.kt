@@ -16,6 +16,7 @@ class ObservableMonad<T> constructor(private val value: T) {
         observers.remove(callback)
         return this
     }
+
     fun notify(x: T): Unit {
         observers.forEach { observer -> observer(x) }
     }
